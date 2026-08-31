@@ -79,3 +79,4 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None) -> d
 def auto_calibrate(cfg: dict) -> dict:
     print("[tabletap] Auto-calibrating (first run)...")
     return calibrate(cfg, duration_sec=5)
+

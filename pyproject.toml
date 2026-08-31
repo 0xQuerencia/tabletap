@@ -18,4 +18,4 @@ dependencies = [
 tabletap = "tabletap.__main__:main"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest>=8.0", "pytest-mock>=3.0"]
