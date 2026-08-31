@@ -1,28 +1,30 @@
-# tabletap configuration
-# Copy to ~/.config/tabletap/config.yaml and customize
-
 audio:
-  device_index: null        # null = system default mic, or set device index
+  device_index: null
   sample_rate: 44100
-  channels: 1               # mono - most laptop mics are mono
+  channels: 1
   chunk_size: 1024
 
+filter:
+  enabled: true
+  low: 20
+  high: 200
+  adaptive: true
+  noise_alpha: 0.05
+  peak_alpha: 0.1
+  snr_gate_db: 6.0
+
 detection:
-  threshold_db: -30         # run `tabletap calibrate` to set this
-  min_gap_ms: 150           # min ms between taps (debounce)
-  rhythm_window_ms: 800     # ms window to count taps as a group
-  long_press_ms: 500        # ms of sustained pressure to trigger long
+  min_gap_ms: 150
+  rhythm_window_ms: 800
+  long_press_ms: 500
 
 calibration:
-  duration_sec: 10
-  noise_floor_margin_db: 6
+  duration_sec: 5
 
-# Tap pattern actions
-# Types: exec (launch app), key (keyboard shortcut), script (run .sh file)
 actions:
   single:
     type: exec
-    value: "spotify"        # change to any app or command
+    value: "spotify"
   double:
     type: exec
     value: "xdg-open https://gmail.com"
