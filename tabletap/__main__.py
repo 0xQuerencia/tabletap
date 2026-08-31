@@ -5,24 +5,42 @@ import sys
 from .config import load_config, init_config
 from .daemon import Daemon
 from .calibrate import calibrate
+from .filter import AdaptiveThreshold
 
 
 def monitor_cmd(cfg: dict):
     import time
     from .mic import MicCapture, rms_db
+    from .filter import make_bandpass, apply_bandpass
 
     audio_cfg = cfg.get("audio", {})
-    threshold = cfg.get("detection", {}).get("threshold_db", -30)
+    filter_cfg = cfg.get("filter", {})
 
-    print(f"[tabletap monitor] Threshold: {threshold} dB")
+    threshold = AdaptiveThreshold(
+        initial_threshold_db=cfg.get("detection", {}).get("threshold_db", -30),
+    )
+    saved_noise = cfg.get("detection", {}).get("noise_floor_db")
+    saved_peak = cfg.get("detection", {}).get("slam_peak_db")
+    if saved_noise is not None and saved_peak is not None:
+        threshold.set_from_calibration(saved_noise, saved_peak)
+
+    sos = None
+    if filter_cfg.get("enabled", True):
+        sos = make_bandpass(
+            filter_cfg.get("low", 20),
+            filter_cfg.get("high", 200),
+            audio_cfg.get("sample_rate", 44100),
+        )
+
+    print(f"[tabletap monitor] Threshold: {threshold.threshold_db:.1f} dB")
     print("[tabletap monitor] Watching mic levels... (Ctrl+C to stop)\n")
 
     try:
-        with MicCapture(audio_cfg) as mic:
+        with MicCapture(audio_cfg, filter_cfg) as mic:
             while True:
-                chunk = mic.read_chunk()
-                db = rms_db(chunk)
-                spike = " <-- SPIKE!" if db > threshold else ""
+                raw, filtered = mic.read_filtered()
+                db = rms_db(filtered)
+                spike = " <-- SPIKE!" if db > threshold.threshold_db else ""
 
                 bar_db = max(0, db + 100)
                 bar_len = int(bar_db / 2)
@@ -88,10 +106,12 @@ def main():
         monitor_cmd(cfg)
 
     elif args.command == "calibrate":
-        threshold = calibrate(cfg, duration_sec=args.duration if hasattr(args, "duration") else None)
+        result = calibrate(cfg, duration_sec=args.duration if hasattr(args, "duration") else None)
         print(f"\nAdd this to your config.yaml:")
         print(f"  detection:")
-        print(f"    threshold_db: {threshold:.1f}")
+        print(f"    noise_floor_db: {result['noise_floor_db']}")
+        print(f"    slam_peak_db: {result['slam_peak_db']}")
+        print(f"    threshold_db: {result['threshold_db']}")
 
     elif args.command == "status":
         print("[tabletap] Current config:")
