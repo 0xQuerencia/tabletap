@@ -8,6 +8,15 @@ ExecStart=%h/.local/bin/tabletap start
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=read-only
+NoNewPrivileges=true
+PrivateTmp=true
+ReadWritePaths=%h/.config/tabletap %h/.cache/tabletap
 
 [Install]
 WantedBy=graphical-session.target
