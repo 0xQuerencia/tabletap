@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfiltfilt
+from scipy.signal import butter, sosfilt, sosfiltfilt, sosfilt_zi
 
 
 def make_bandpass(low: float, high: float, fs: int, order: int = 4):
@@ -19,6 +19,32 @@ def apply_bandpass(chunk: np.ndarray, sos, prev_tail: np.ndarray = None):
         return filtered
     else:
         return sosfilt(sos, chunk.astype(np.float64))
+
+
+class StatefulBandpass:
+    def __init__(self, sos, channels=1):
+        self.sos = sos
+        self.channels = channels
+        zi_base = sosfilt_zi(sos) * 0
+        
+        if channels > 1:
+            self.zi = [zi_base.copy() for _ in range(channels)]
+        else:
+            self.zi = zi_base
+        
+    def process(self, chunk: np.ndarray) -> np.ndarray:
+        chunk_float = chunk.astype(np.float64)
+        
+        if chunk.ndim > 1:
+            filtered = np.zeros_like(chunk_float)
+            for ch in range(chunk.shape[1]):
+                filtered[:, ch], self.zi[ch] = sosfilt(
+                    self.sos, chunk_float[:, ch], zi=self.zi[ch]
+                )
+            return filtered
+        else:
+            filtered, self.zi = sosfilt(self.sos, chunk_float, zi=self.zi)
+            return filtered
 
 
 class AdaptiveThreshold:
@@ -97,3 +123,4 @@ class OnsetDetector:
             return True
 
         return False
+
