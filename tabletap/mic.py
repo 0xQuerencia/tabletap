@@ -5,9 +5,11 @@ try:
 except ImportError:
     pyaudio = None
 
+from .filter import make_bandpass, apply_bandpass
+
 
 class MicCapture:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, filter_cfg: dict = None):
         if pyaudio is None:
             raise ImportError("pyaudio required: pip install pyaudio")
         self.sample_rate = cfg.get("sample_rate", 44100)
@@ -25,12 +27,25 @@ class MicCapture:
             frames_per_buffer=self.chunk,
         )
 
+        self.sos = None
+        if filter_cfg and filter_cfg.get("enabled", True):
+            low = filter_cfg.get("low", 20)
+            high = filter_cfg.get("high", 200)
+            self.sos = make_bandpass(low, high, self.sample_rate)
+
     def read_chunk(self) -> np.ndarray:
         raw = self.stream.read(self.chunk, exception_on_overflow=False)
         data = np.frombuffer(raw, dtype=np.int16)
         if self.channels > 1:
             data = data.reshape(-1, self.channels)
         return data
+
+    def read_filtered(self) -> tuple[np.ndarray, np.ndarray]:
+        raw = self.read_chunk()
+        if self.sos is not None:
+            filtered = apply_bandpass(raw, self.sos)
+            return raw, filtered
+        return raw, raw.astype(np.float64)
 
     def close(self):
         self.stream.stop_stream()
