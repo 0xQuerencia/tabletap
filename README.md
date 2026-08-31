@@ -6,7 +6,7 @@ Turn your desk into a button pad using the laptop's built-in microphone. Tap the
 
 tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple) and hold duration (short/medium/long), then mapped to keyboard shortcuts, app launches, or custom scripts.
 
-No extra hardware. No accelerometer needed. Just your laptop mic and a hard desk surface.
+No extra hardware needed. Just your laptop mic and a hard desk surface.
 
 ## Quick start
 
@@ -28,8 +28,8 @@ First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns 
 | `tabletap calibrate` | Recalibrate noise floor and slam threshold |
 | `tabletap calibrate --no-save` | Dry-run calibration without saving |
 | `tabletap monitor` | Watch mic levels and spikes in real-time |
-| `tabletap test -d 15` | Dry-run mode: detect taps for 15 seconds, no actions executed |
-| `tabletap status` | Show current config and device info |
+| `tabletap test -d 15` | Dry-run mode: detect taps for 15s, no actions executed |
+| `tabletap status` | Show current config |
 
 ## Tap patterns
 
@@ -45,46 +45,32 @@ First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns 
 
 ## Configuration
 
-Config file: `~/.config/tabletap/config.yaml`
-
-### Audio settings
+Config lives at `~/.config/tabletap/config.yaml`:
 
 ```yaml
 audio:
-  device_index: null       # null = default mic, or integer device index
+  device_index: null
   sample_rate: 44100
-  channels: 1              # mono
+  channels: 1
   chunk_size: 1024
-```
 
-### Filter settings
-
-```yaml
 filter:
   enabled: true
-  low: 50                  # Hz - lower cutoff
-  high: 800                # Hz - upper cutoff
+  low: 50
+  high: 800
   adaptive: true
-  noise_alpha: 0.05        # noise floor smoothing (0-1)
-  peak_alpha: 0.1          # peak tracking smoothing (0-1)
-  snr_gate_db: 6.0         # minimum SNR above noise to trigger
-```
+  noise_alpha: 0.05
+  peak_alpha: 0.1
+  snr_gate_db: 6.0
 
-### Detection settings
-
-```yaml
 detection:
-  min_gap_ms: 150          # minimum time between taps
-  rhythm_window_ms: 800    # window for multi-tap patterns
-  long_press_ms: 500       # short hold threshold
-  medium_hold_ms: 2000     # medium hold threshold
-  long_hold_ms: 4000       # long hold threshold
-  hold_repeat_ms: 500      # repeat interval during hold
-```
+  min_gap_ms: 150
+  rhythm_window_ms: 800
+  long_press_ms: 500
+  medium_hold_ms: 2000
+  long_hold_ms: 4000
+  hold_repeat_ms: 500
 
-### Actions
-
-```yaml
 actions:
   single:
     type: exec
@@ -107,6 +93,10 @@ actions:
   repeat:
     type: exec
     value: "pactl set-sink-volume @DEFAULT_SINK@ +2%"
+
+feedback:
+  notifications: true
+  notification_urgency: low
 ```
 
 ### Action types
@@ -114,7 +104,7 @@ actions:
 | Type | Description | Example |
 |------|-------------|---------|
 | `key` | Press keyboard shortcut | `alt+tab`, `ctrl+shift+t`, `super+left` |
-| `exec` | Run a shell command | `spotify`, `xdg-open https://...` |
+| `exec` | Run a command | `spotify`, `xdg-open https://...` |
 | `script` | Run a bash script | `~/.local/bin/my-script.sh` |
 
 ### Action categories
@@ -136,24 +126,6 @@ actions:
       name: "Terminal"
       type: exec
       value: "alacritty"
-    4:
-      name: "VS Code"
-      type: exec
-      value: "code"
-
-  multitasking:
-    1:
-      name: "Mission Control"
-      type: key
-      value: "super+s"
-    2:
-      name: "Split Left"
-      type: key
-      value: "super+left"
-    3:
-      name: "Split Right"
-      type: key
-      value: "super+right"
 
   media:
     1:
@@ -164,21 +136,9 @@ actions:
       name: "Next Track"
       type: key
       value: "XF86AudioNext"
-    3:
-      name: "Previous Track"
-      type: key
-      value: "XF86AudioPrev"
 ```
 
-Single tap = action 1, double tap = action 2, triple tap = action 3, long press = action 4.
-
-### Notifications
-
-```yaml
-feedback:
-  notifications: true
-  notification_urgency: low    # low, normal, critical
-```
+Single tap = action 1, double tap = action 2, triple tap = action 3.
 
 ## Systemd service
 
@@ -194,17 +154,17 @@ kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
 
 ## Features
 
-- Bandpass filter (50-800Hz) isolates desk impacts from speech
-- Adaptive threshold auto-tunes to ambient noise
-- Onset detection via energy derivative, not just amplitude
+- Bandpass filter (50-800Hz) isolates desk impacts from speech and ambient noise
+- Adaptive threshold auto-tunes to your environment
+- Onset detection via energy derivative for precise tap timing
 - Debounced silence prevents false long-press triggers
-- Async action execution (never blocks detection loop)
+- Async action execution via thread pool (never blocks detection)
 - Mic reconnection with exponential backoff on disconnect
 - PID lock prevents multiple daemon instances
 - Wayland support (wlrctl/ydotool) with X11 fallback (xdotool)
 - Desktop notifications via notify-send
 - Config validation with warnings on invalid values
-- SIGHUP config reload without restart
+- SIGHUP reload config without restarting
 - Systemd hardened (ProtectSystem, NoNewPrivileges, PrivateTmp)
 - 53 tests with mocked PyAudio (no hardware required)
 
