@@ -8,7 +8,8 @@ import yaml
 log = logging.getLogger("tabletap")
 
 DEFAULT_PATHS = [
-    Path.home() / ".config" / "tabletap" / "config.yaml",
+    Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "tabletap" / "config.yaml",
+    Path(__file__).parent / "default_config.yaml",
     Path(__file__).parent.parent / "config.yaml",
 ]
 
@@ -89,7 +90,7 @@ def init_config(dest: str | Path | None = None) -> Path:
     if dest.exists():
         return dest
     import shutil
-    src = Path(__file__).parent.parent / "config.yaml"
+    src = Path(__file__).parent / "default_config.yaml"
     shutil.copy2(src, dest)
     return dest
 
