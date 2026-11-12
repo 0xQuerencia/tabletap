@@ -34,7 +34,7 @@ const theme = {
   pink: "#f2a7c3",
 }
 const PAGES = ["Home", "Actions", "Calibrate", "Settings", "Activity"] as const
-const DEFAULT_PATTERNS = ["single", "double", "triple", "long", "medium", "extended", "repeat"]
+const DEFAULT_PATTERNS = ["single", "double", "triple", "quadruple", "long", "medium", "extended", "repeat"]
 const PYTHON = process.env.TABLETAP_PYTHON || "python3"
 const CONFIG = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "tabletap", "config.yaml")
 const PREFS = join(dirname(CONFIG), "tui.json")
