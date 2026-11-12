@@ -36,6 +36,7 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
     audio = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     detection = cfg.get("detection", {})
+    sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
 
     if category is not None and category not in cfg.get("actions", {}):
         emit("error", message=f"Unknown category: {category}")
@@ -91,14 +92,14 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         with MicCapture(audio, filter_cfg) as mic:
             emit(
                 "ready", category=category or "default",
-                dry_run=dry_run, threshold_db=round(threshold.threshold_db, 1),
+                dry_run=dry_run, threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
             )
             last_level_at = 0.0
             while running:
                 _raw, filtered = mic.read_filtered()
                 db = rms_db(filtered)
                 now = time.monotonic()
-                spike = threshold.is_above(db)
+                spike = db > threshold.threshold_db + sensitivity_offset
                 # Feed the energy derivative on *every* chunk. Skipping silence
                 # otherwise leaves the onset detector with stale energy.
                 started = onset.feed(db, now)
@@ -111,7 +112,7 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
                 if now - last_level_at >= 0.1:
                     emit(
                         "level", db=round(db, 1),
-                        threshold_db=round(threshold.threshold_db, 1),
+                        threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
                         spike=spike,
                     )
                     last_level_at = now
