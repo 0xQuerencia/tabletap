@@ -210,7 +210,7 @@ def main():
                 print("[tabletap] Bun missing. Install Bun from https://bun.sh")
                 sys.exit(1)
             if not (ui / "package.json").exists():
-                print("[tabletap] TUI source is missing. Use an editable checkout.", file=sys.stderr)
+                print("[tabletap] TUI sources are missing from this Python installation.", file=sys.stderr)
                 sys.exit(1)
             print("[tabletap] Config: " + str(dest))
             print("[tabletap] Installing OpenTUI dependencies…")
@@ -259,11 +259,14 @@ def main():
         bun = shutil.which("bun")
         if not bun:
             print("[tabletap] Bun is required for the OpenTUI interface.")
-            print("Install Bun: https://bun.sh then run: cd tui && bun install")
+            print("Install Bun: https://bun.sh then run: tabletap setup")
             sys.exit(1)
         ui = _prepare_ui() / "index.tsx"
+        if not (ui.parent / "node_modules" / "@opentui").is_dir():
+            print("[tabletap] OpenTUI dependencies missing. Run: tabletap setup", file=sys.stderr)
+            sys.exit(1)
         if not ui.exists():
-            print("[tabletap] TUI sources not found. Run from an editable checkout (pip install -e .).", file=sys.stderr)
+            print("[tabletap] TUI sources missing from the installed Python package.", file=sys.stderr)
             sys.exit(1)
         from .config import init_config
         init_config()
