@@ -4,3 +4,10 @@ __pycache__/
 dist/
 build/
 .eggs/
+
+# OpenTUI dependencies and Python distributions
+tabletap/ui/node_modules/
+*.egg-info/
+build/
+dist/
+.venv/
