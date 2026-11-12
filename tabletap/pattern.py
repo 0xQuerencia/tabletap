@@ -36,7 +36,8 @@ class PatternDetector:
                  medium_hold_ms: int = 2000,
                  long_hold_ms: int = 4000,
                  hold_repeat_ms: int = 500,
-                 hold_timeout_ms: int = 2000):
+                 hold_timeout_ms: int = 2000,
+                 enable_hold: bool = True):
         self.min_gap = min_gap_ms / 1000.0
         self.rhythm_window = rhythm_window_ms / 1000.0
         self.long_press = long_press_ms / 1000.0
@@ -44,6 +45,7 @@ class PatternDetector:
         self.long_hold = long_hold_ms / 1000.0
         self.hold_repeat = hold_repeat_ms / 1000.0
         self.hold_timeout = hold_timeout_ms / 1000.0
+        self.enable_hold = enable_hold
 
         self._tap_count = 0
         self._first_tap_time: float = 0.0
@@ -94,7 +96,7 @@ class PatternDetector:
         
         hold_duration = now - self._hold_start_time
         
-        if self._hold_spike_count >= 3:
+        if self.enable_hold and self._hold_spike_count >= 3:
             self._in_hold = False
             self._hold_spike_count = 0
             self._tap_count = 0
@@ -112,7 +114,7 @@ class PatternDetector:
         return None
 
     def check_hold_repeat(self) -> Optional[TapEvent]:
-        if not self._in_hold:
+        if not self.enable_hold or not self._in_hold:
             return None
         
         now = time.monotonic()
