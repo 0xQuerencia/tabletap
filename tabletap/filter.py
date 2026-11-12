@@ -108,12 +108,17 @@ class OnsetDetector:
         self._prev_deriv = 0.0
         self._last_onset_time = 0.0
 
-    def feed(self, energy_db: float, now: float) -> bool:
+    def feed(self, energy_db: float, now: float, active: bool = True) -> bool:
         delta = energy_db - self._prev_energy
         self._prev_energy = energy_db
 
         deriv_delta = delta - self._prev_deriv
         self._prev_deriv = delta
+
+        # Quiet fluctuations update the derivative baseline but must never
+        # consume the tap refractory window before a genuine impact.
+        if not active:
+            return False
 
         if (now - self._last_onset_time) < self.min_gap:
             return False
