@@ -1,11 +1,29 @@
 import argparse
 import logging
 import sys
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
 from .config import load_config, init_config, save_calibration
 from .daemon import Daemon
 from .calibrate import calibrate
 from .filter import AdaptiveThreshold
+
+
+def _prepare_ui():
+    """Copy bundled TUI sources into a user-writable cache directory."""
+    from . import __version__
+    bundled = Path(__file__).resolve().parent / "ui"
+    if not (bundled / "index.tsx").exists():
+        raise FileNotFoundError("TableTap OpenTUI resources are missing from this installation")
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    ui = base / "tabletap" / ("ui-v" + __version__)
+    ui.mkdir(parents=True, exist_ok=True)
+    for name in ("index.tsx", "package.json", "tsconfig.json", "bunfig.toml"):
+        shutil.copy2(bundled / name, ui / name)
+    return ui
 
 
 def monitor_cmd(cfg: dict):
@@ -47,7 +65,6 @@ def monitor_cmd(cfg: dict):
                 bar = "#" * min(bar_len, 50)
 
                 print(f"\r  {db:6.1f} dB |{bar.ljust(50)}|{spike}", end="", flush=True)
-                time.sleep(0.05)
     except KeyboardInterrupt:
         print("\n\n[tabletap monitor] Stopped.")
 
@@ -94,10 +111,11 @@ def test_cmd(cfg: dict, duration: int):
                 now = time.monotonic()
 
                 is_spike = threshold.is_above(db)
+                # Keep the onset baseline updated during silence too.
+                detected = onset.feed(db, now, active=is_spike)
 
                 if is_spike:
                     threshold.update(db, True)
-                    detected = onset.feed(db, now)
                     if detected:
                         event = pattern_detector.feed()
                         if event:
@@ -124,7 +142,6 @@ def test_cmd(cfg: dict, duration: int):
                 remaining = duration - elapsed
                 print(f"\r  [{remaining:2d}s] {db:6.1f} dB (thr: {threshold.threshold_db:.1f}) |{bar.ljust(50)}|{spike}", end="", flush=True)
 
-                time.sleep(0.05)
     except KeyboardInterrupt:
         pass
 
@@ -158,6 +175,15 @@ def main():
     init_p.add_argument("--path", help="Custom destination path")
 
     sub.add_parser("status", help="Show current config and device info")
+    sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
+    sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
+    bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
+    bridge_p.add_argument("-c", "--config", help="Path to config.yaml")
+    bridge_p.add_argument("--category", help="Action category")
+    bridge_p.add_argument("--dry-run", action="store_true", help="Detect but do not execute")
+    bridge_p.add_argument("--calibrate", action="store_true", help="Stream calibration progress")
+    tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
+    tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
     args = parser.parse_args()
 
@@ -167,8 +193,103 @@ def main():
         return
 
     if args.command is None:
-        parser.print_help()
+        args.command = "tui"
+        args.demo = False
+
+    if args.command in ("setup", "doctor"):
+        from .config import init_config
+        from .config import validate_config
+        dest = init_config()
+        bun = shutil.which("bun")
+        ui = _prepare_ui()
+        installed = (ui / "node_modules" / "@opentui").is_dir()
+
+        if args.command == "setup":
+            if not bun:
+                print("[tabletap] Bun missing. Install Bun from https://bun.sh")
+                sys.exit(1)
+            if not (ui / "package.json").exists():
+                print("[tabletap] TUI sources are missing from this Python installation.", file=sys.stderr)
+                sys.exit(1)
+            print("[tabletap] Config: " + str(dest))
+            print("[tabletap] Installing OpenTUI dependencies…")
+            sys.exit(subprocess.call([bun, "install"], cwd=ui))
+
+        import platform
+        print("TableTap diagnostics")
+        print("  Python: " + platform.python_version())
+        print("  Config: " + str(dest))
+        try:
+            cfg = load_config(dest)
+            warnings = validate_config(cfg)
+            print("  Config valid: " + ("yes" if not warnings else "warnings"))
+            for warning in warnings:
+                print("    WARNING: " + warning)
+        except Exception as exc:
+            print("  Config: ERROR " + str(exc))
+        print("  Bun: " + (bun or "MISSING (install Bun)"))
+        print("  TUI sources: " + ("yes" if (ui / "index.tsx").exists() else "NO"))
+        print("  TUI packages: " + ("installed" if installed else "MISSING (tabletap setup)"))
+        print("  Display: " + ("Wayland" if os.environ.get("WAYLAND_DISPLAY") else
+                              "X11" if os.environ.get("DISPLAY") else "headless"))
+        if os.environ.get("WAYLAND_DISPLAY"):
+            keytool = shutil.which("wtype") or shutil.which("ydotool")
+            missing = "MISSING (install wtype or ydotool)"
+        else:
+            keytool = shutil.which("xdotool")
+            missing = "MISSING (install xdotool)"
+        print("  Key tool: " + (keytool or missing))
+        try:
+            from .mic import pyaudio
+            if pyaudio is None:
+                raise RuntimeError("pyaudio not installed")
+            pa = pyaudio.PyAudio()
+            try:
+                inputs = [
+                    pa.get_device_info_by_index(index)
+                    for index in range(pa.get_device_count())
+                    if pa.get_device_info_by_index(index).get("maxInputChannels", 0) > 0
+                ]
+                print("  Microphone devices: " + str(len(inputs)))
+                for item in inputs[:6]:
+                    print("    - " + str(item.get("name", "?")))
+            finally:
+                pa.terminate()
+        except Exception as exc:
+            print("  Microphone: unavailable: " + str(exc))
         return
+
+    if args.command == "tui":
+        bun = shutil.which("bun")
+        if not bun:
+            print("[tabletap] Bun is required for the OpenTUI interface.")
+            print("Install Bun: https://bun.sh then run: tabletap setup")
+            sys.exit(1)
+        ui = _prepare_ui() / "index.tsx"
+        if not (ui.parent / "node_modules" / "@opentui").is_dir():
+            print("[tabletap] OpenTUI dependencies missing. Run: tabletap setup", file=sys.stderr)
+            sys.exit(1)
+        if not ui.exists():
+            print("[tabletap] TUI sources missing from the installed Python package.", file=sys.stderr)
+            sys.exit(1)
+        from .config import init_config
+        init_config()
+        env = os.environ.copy()
+        env["TABLETAP_PYTHON"] = sys.executable
+        cmd = [bun, "run", str(ui)]
+        if args.demo:
+            cmd.append("--demo")
+        sys.exit(subprocess.call(cmd, cwd=str(ui.parent), env=env))
+
+    if args.command == "bridge":
+        from .bridge import run_bridge, run_calibration
+        if args.calibrate:
+            sys.exit(run_calibration(config_path=args.config))
+        sys.exit(run_bridge(
+            config_path=args.config,
+            category=args.category,
+            dry_run=args.dry_run,
+        ))
 
     try:
         cfg = load_config(args.config if hasattr(args, "config") else None)

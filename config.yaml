@@ -22,6 +22,7 @@ detection:
   long_press_ms: 500      # short hold (backward compat) - 500ms-2s
   medium_hold_ms: 2000    # medium hold - 2s-4s
   long_hold_ms: 4000      # long hold - 4s+
+  enable_hold_gestures: false  # sustained pressure cannot be reliably inferred from microphone audio
   hold_repeat_ms: 500     # repeat interval during sustained hold
 
 # Auto-calibration settings
@@ -40,6 +41,9 @@ actions:
   triple:
     type: exec
     value: "xdg-open https://youtube.com"
+  quadruple:
+    type: key
+    value: alt+tab
   long:          # 500ms-2s
     type: key
     value: alt+tab

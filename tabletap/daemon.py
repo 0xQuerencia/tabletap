@@ -11,14 +11,15 @@ from .pattern import PatternDetector
 from .action import ActionRunner
 from .calibrate import auto_calibrate
 from .lock import PIDLock
-from .config import load_config
+from .config import load_config, save_calibration
 
 log = logging.getLogger("tabletap")
 
 
 class Daemon:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, category: str | None = None):
         self.cfg = cfg
+        self.category = category
         self._running = False
         self._needs_reload = False
         self.lock = PIDLock()
@@ -29,11 +30,12 @@ class Daemon:
         self.filter_cfg = self.cfg.get("filter", {})
         self.detect_cfg = self.cfg.get("detection", {})
         self.feedback_cfg = self.cfg.get("feedback", {})
-        self.action_runner = ActionRunner(self.cfg.get("actions", {}))
+        self.action_runner = ActionRunner(self.cfg.get("actions", {}), category=self.category)
         self.pattern_detector = PatternDetector(
             min_gap_ms=self.detect_cfg.get("min_gap_ms", 150),
             rhythm_window_ms=self.detect_cfg.get("rhythm_window_ms", 800),
             long_press_ms=self.detect_cfg.get("long_press_ms", 500),
+            enable_hold=self.detect_cfg.get("enable_hold_gestures", False),
         )
         self._notifications_enabled = self.feedback_cfg.get("notifications", True)
         self._notification_urgency = self.feedback_cfg.get("notification_urgency", "low")
@@ -57,8 +59,16 @@ class Daemon:
     def _reload_config(self):
         try:
             log.info("Reloading configuration...")
-            self.cfg = load_config()
-            self._build_components()
+            new_cfg = load_config()
+            old_cfg, old_runner = self.cfg, self.action_runner
+            self.cfg = new_cfg
+            try:
+                self._build_components()
+            except Exception:
+                self.cfg = old_cfg
+                self.action_runner = old_runner
+                raise
+            old_runner.shutdown()
             log.info("Configuration reloaded successfully (threshold: %.1f dB)", 
                      self.threshold.threshold_db)
             self._needs_reload = False
@@ -79,6 +89,7 @@ class Daemon:
         if self.detect_cfg.get("threshold_db") is None and self.detect_cfg.get("noise_floor_db") is None:
             log.info("No calibration found, running auto-calibrate...")
             result = auto_calibrate(self.cfg)
+            save_calibration(self.cfg, result)
             self.threshold.set_from_calibration(result["noise_floor_db"], result["slam_peak_db"])
             log.info("Auto-calibration done: noise=%.1f peak=%.1f threshold=%.1f",
                      result["noise_floor_db"], result["slam_peak_db"], self.threshold.threshold_db)
@@ -98,29 +109,31 @@ class Daemon:
                     now = time.monotonic()
 
                     is_spike = self.threshold.is_above(db)
+                    # Feed the onset detector for quiet frames too, otherwise
+                    # its baseline stays stale and isolated taps are missed.
+                    detected = self.onset.feed(db, now, active=is_spike)
 
-                if is_spike:
-                    self.threshold.update(db, True)
-                    detected = self.onset.feed(db, now)
-                    if detected:
-                        event = self.pattern_detector.feed()
+                    if is_spike:
+                        self.threshold.update(db, True)
+                        if detected:
+                            event = self.pattern_detector.feed()
+                            if event:
+                                log.info("TAP -> %s (threshold: %.1f dB)", event.key(), self.threshold.threshold_db)
+                                self._notify(event.key())
+                                self.action_runner.run(event.key())
+                    else:
+                        self.threshold.update(db, False)
+                        event = self.pattern_detector.on_silence()
                         if event:
-                            log.info("TAP -> %s (threshold: %.1f dB)", event.key(), self.threshold.threshold_db)
+                            log.info("HOLD -> %s", event.key())
                             self._notify(event.key())
                             self.action_runner.run(event.key())
-                else:
-                    self.threshold.update(db, False)
-                    event = self.pattern_detector.on_silence()
-                    if event:
-                        log.info("HOLD -> %s", event.key())
-                        self._notify(event.key())
-                        self.action_runner.run(event.key())
 
-                timeout_event = self.pattern_detector.check_window_timeout()
-                if timeout_event:
-                    log.info("RHYTHM -> %s", timeout_event.key())
-                    self._notify(timeout_event.key())
-                    self.action_runner.run(timeout_event.key())
+                    timeout_event = self.pattern_detector.check_window_timeout()
+                    if timeout_event:
+                        log.info("RHYTHM -> %s", timeout_event.key())
+                        self._notify(timeout_event.key())
+                        self.action_runner.run(timeout_event.key())
         except MicDisconnected as e:
             log.error("Microphone permanently disconnected: %s", e)
             self.lock.release()

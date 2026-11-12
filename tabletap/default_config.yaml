@@ -1,0 +1,137 @@
+# Audio capture settings
+audio:
+  device_index: null  # null = default device, or integer index
+  sample_rate: 44100  # Hz - audio sampling rate
+  channels: 1         # mono input
+  chunk_size: 1024    # samples per read
+
+# Bandpass filter and adaptive threshold
+filter:
+  enabled: true
+  low: 50             # Hz - lower frequency cutoff (widened from 20)
+  high: 800           # Hz - upper frequency cutoff (widened from 200)
+  adaptive: true      # enable adaptive threshold
+  noise_alpha: 0.05   # exponential smoothing for noise floor (0-1)
+  peak_alpha: 0.1     # exponential smoothing for peak tracking (0-1)
+  snr_gate_db: 6.0    # minimum SNR above noise floor to trigger
+
+# Tap detection and rhythm timing
+detection:
+  min_gap_ms: 150         # minimum time between taps
+  rhythm_window_ms: 800   # window for detecting multi-tap patterns
+  long_press_ms: 500      # short hold (backward compat) - 500ms-2s
+  medium_hold_ms: 2000    # medium hold - 2s-4s
+  long_hold_ms: 4000      # long hold - 4s+
+  enable_hold_gestures: false  # sustained pressure cannot be reliably inferred from microphone audio
+  hold_repeat_ms: 500     # repeat interval during sustained hold
+
+# Auto-calibration settings
+calibration:
+  duration_sec: 5  # seconds to sample for auto-calibration
+
+# Actions mapped to tap patterns
+actions:
+  # Rhythm-based actions (backward compatible)
+  single:
+    type: exec
+    value: "spotify"
+  double:
+    type: exec
+    value: "xdg-open https://gmail.com"
+  triple:
+    type: exec
+    value: "xdg-open https://youtube.com"
+  quadruple:
+    type: key
+    value: alt+tab
+  long:          # 500ms-2s
+    type: key
+    value: alt+tab
+  medium:        # 2s-4s
+    type: exec
+    value: "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+  extended:      # 4s+
+    type: exec
+    value: "loginctl lock-session"
+  repeat:        # Every 500ms during hold
+    type: exec
+    value: "pactl set-sink-volume @DEFAULT_SINK@ +2%"
+  
+  # Category-based actions (numbered 1-N)
+  # Use with: tabletap start --category <name>
+  productivity:
+    1:
+      name: "Email"
+      type: exec
+      value: "xdg-open https://mail.google.com"
+    2:
+      name: "Calendar"
+      type: exec
+      value: "xdg-open https://calendar.google.com"
+    3:
+      name: "Terminal"
+      type: exec
+      value: "alacritty"
+    4:
+      name: "VS Code"
+      type: exec
+      value: "code"
+  
+  multitasking:
+    1:
+      name: "Mission Control"
+      type: key
+      value: "super+s"
+    2:
+      name: "Split Left"
+      type: key
+      value: "super+left"
+    3:
+      name: "Split Right"
+      type: key
+      value: "super+right"
+    4:
+      name: "Full Screen"
+      type: key
+      value: "f11"
+  
+  smart_home:
+    1:
+      name: "Lights Toggle"
+      type: script
+      value: "~/.local/bin/tabletap-lights toggle"
+    2:
+      name: "Lights Dim"
+      type: script
+      value: "~/.local/bin/tabletap-lights dim"
+    3:
+      name: "All Off"
+      type: script
+      value: "~/.local/bin/tabletap-lights off"
+  
+  media:
+    1:
+      name: "Play/Pause"
+      type: key
+      value: "XF86AudioPlay"
+    2:
+      name: "Next Track"
+      type: key
+      value: "XF86AudioNext"
+    3:
+      name: "Previous Track"
+      type: key
+      value: "XF86AudioPrev"
+    4:
+      name: "Volume Up"
+      type: key
+      value: "XF86AudioRaiseVolume"
+
+# Feedback and notifications
+feedback:
+  notifications: true
+  notification_urgency: low  # low, normal, critical
+
+# Logging verbosity
+logging:
+  level: INFO

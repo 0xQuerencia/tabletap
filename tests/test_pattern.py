@@ -206,3 +206,18 @@ def test_reset_clears_state():
         assert detector._tap_count == 0
         assert not detector._in_hold
         assert detector._hold_spike_count == 0
+
+
+def test_four_tap_timing():
+    detector = PatternDetector(min_gap_ms=100, rhythm_window_ms=800)
+    detector._last_tap_time = -1.0
+    with patch("time.monotonic") as clock:
+        for at in (0.0, 0.2, 0.4, 0.6):
+            clock.return_value = at
+            detector.feed()
+            clock.return_value = at + 0.17
+            detector.on_silence()
+        clock.return_value = 0.9
+        detected = detector.check_window_timeout()
+    assert detected is not None
+    assert detected.pattern == TapPattern.QUADRUPLE

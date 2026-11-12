@@ -1,0 +1,53 @@
+name: TableTap checks
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PortAudio
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: Build wheel
+        run: python -m pip wheel --no-deps -w dist .
+      - name: Verify wheel includes the terminal app
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+          wheel = glob.glob("dist/tabletap*.whl")[0]
+          with zipfile.ZipFile(wheel) as archive:
+              for name in ("tabletap/ui/index.tsx", "tabletap/ui/package.json",
+                           "tabletap/ui/bunfig.toml", "tabletap/default_config.yaml"):
+                  assert name in archive.namelist(), f"Missing in wheel: {name}"
+          print("Wheel includes bundled OpenTUI files")
+          PY
+      - name: Install wheel in a clean virtual environment
+        run: |
+          python -m venv --system-site-packages /tmp/tabletap-wheelcheck
+          /tmp/tabletap-wheelcheck/bin/pip install --no-deps dist/tabletap*.whl
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/python -c "import tabletap; from pathlib import Path; p = Path(tabletap.__file__).parent / 'ui' / 'index.tsx'; assert p.is_file(), p; print('Installed wheel UI:', p)")
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap --help)
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap doctor)
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install TUI dependencies
+        run: cd tabletap/ui && bun install
+      - name: Typecheck OpenTUI
+        run: cd tabletap/ui && bunx tsc --noEmit
+      - name: Launch/exit OpenTUI in a terminal
+        run: python tests/smoke_tui.py

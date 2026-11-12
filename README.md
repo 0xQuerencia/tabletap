@@ -1,10 +1,75 @@
 # tabletap
 
+**Make your desk a programmable shortcut pad — from the terminal.**
+
+TableTap now has a keyboard-first terminal interface built with **OpenTUI**,
+the framework used by OpenCode's terminal application. The microphone engine
+continues to run locally in Python; no desktop GUI, cloud account, or AI model
+is needed. The [Rune](https://github.com/anomalyco/rune) project is a different
+GPU-native graphical UI framework and is intentionally not used here.
+
+## Run the terminal app
+
+Requires Linux, Python 3.10+, a microphone, and Bun (1.3.14+; use the latest
+stable release). From a source checkout:
+
+```bash
+git clone https://github.com/0xQuerencia/tabletap
+cd tabletap
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+tabletap setup
+tabletap
+```
+
+Setup copies an editable YAML configuration to
+`~/.config/tabletap/config.yaml` (or `$XDG_CONFIG_HOME/tabletap/config.yaml`).
+You can also explicitly launch `tabletap tui`. See the [Arch/CachyOS/Hyprland installation guide](docs/INSTALL_ARCH.md) for audio permissions, Wayland shortcuts and verification.
+
+Run `tabletap doctor` to check your microphone, Bun installation and keyboard tooling.
+
+**Preview the interface without a microphone or executing actions:**
+
+```bash
+tabletap tui --demo
+```
+
+### Keyboard controls
+
+| Key | Effect |
+| --- | --- |
+| `1`–`5`, `Tab`, `←`/`→` | Switch Home, Actions, Calibrate, Settings, Activity |
+| `Space` | Start/stop the listener |
+| `p` | Cycle default, productivity, media and other configured profiles |
+| `v` | Toggle preview (detect without executing actions) |
+| `c` | Calibrate microphone (quiet phase, then tapping phase) |
+| `j`/`k`, `Enter` | Select/edit a mapped action on Actions |
+| `t` | Cycle action type: exec, key, script |
+| `+`/`-` | Tune threshold on Settings |
+| `/` | Command palette, e.g. `/start`, `/stop`, `/calibrate`, `/profile media` |
+| `?`, `q` | Help, quit |
+
+Action edits are persisted to the YAML file, and an active listener is
+restarted after edits. The JSON-lines bridge is internal and can be invoked
+with `tabletap bridge --dry-run`. It reports live levels and gesture/action
+events, and executes user-configured commands only when dry-run is off.
+
+**Security note:** actions run locally as your OS user. Review custom commands
+and scripts before enabling listening. Tap gestures are not authentication.
+
+**Current limitations:** This is a newly integrated implementation requiring
+real microphone and terminal testing. Hold-duration gestures remain
+experimental, and accessibility/noise robustness varies with microphone,
+table surface, and room conditions.
+
+---
+
 Turn your desk into a button pad using the laptop's built-in microphone. Tap the table, trigger actions.
 
 ## How it works
 
-tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple) and hold duration (short/medium/long), then mapped to keyboard shortcuts, app launches, or custom scripts.
+tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple/quadruple). Experimental hold recognition is off by default. Events are mapped to keyboard shortcuts, app launches, or custom scripts.
 
 No extra hardware needed. Just your laptop mic and a hard desk surface.
 
@@ -38,6 +103,7 @@ First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns 
 | Single tap | 1 tap within 800ms | Launch Spotify |
 | Double tap | 2 taps within 800ms | Open Gmail |
 | Triple tap | 3 taps within 800ms | Open YouTube |
+| Four taps | 4 taps within 800ms | Alt+Tab |
 | Long press | 500ms-2s hold | Alt+Tab |
 | Medium hold | 2s-4s hold | Volume +5% |
 | Extended hold | 4s+ hold | Lock screen |
@@ -138,7 +204,7 @@ actions:
       value: "XF86AudioNext"
 ```
 
-Single tap = action 1, double tap = action 2, triple tap = action 3.
+Single tap = action 1, double tap = action 2, triple tap = action 3, four taps = action 4.
 
 ## Systemd service
 

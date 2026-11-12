@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tabletap"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn your laptop table into a button pad using the built-in microphone"
 requires-python = ">=3.10"
 dependencies = [
@@ -19,3 +19,10 @@ tabletap = "tabletap.__main__:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.0"]
+
+[tool.setuptools.package-data]
+tabletap = ["default_config.yaml", "ui/*.tsx", "ui/*.json", "ui/*.toml"]
+
+[tool.setuptools.packages.find]
+include = ["tabletap*"]
+exclude = ["tui*", "tests*"]
