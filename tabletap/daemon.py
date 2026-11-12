@@ -111,7 +111,7 @@ class Daemon:
                     is_spike = self.threshold.is_above(db)
                     # Feed the onset detector for quiet frames too, otherwise
                     # its baseline stays stale and isolated taps are missed.
-                    detected = self.onset.feed(db, now)
+                    detected = self.onset.feed(db, now, active=is_spike)
 
                     if is_spike:
                         self.threshold.update(db, True)
