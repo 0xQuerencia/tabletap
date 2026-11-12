@@ -1,0 +1,31 @@
+name: TableTap checks
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feat/terminal-first-tui
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PortAudio
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+      - name: Install package and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Unit tests
+        run: python -m pytest -q
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install TUI dependencies
+        run: cd tui && bun install
+      - name: Typecheck OpenTUI
+        run: cd tui && bunx tsc --noEmit
