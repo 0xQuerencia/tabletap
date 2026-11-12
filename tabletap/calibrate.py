@@ -27,9 +27,9 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
             _, filtered = mic.read_filtered()
             db = rms_db(filtered)
             noise_samples.append(db)
-            if progress is not None:
-                progress("noise", elapsed if "elapsed" in locals() else 0, duration, db)
             elapsed = time.monotonic() - start
+            if progress is not None:
+                progress("noise", elapsed, duration, db)
             bar_len = int((elapsed / duration) * 30)
             sys.stdout.write(f"\r  [{('#' * bar_len).ljust(30)}] {db:.1f} dB")
             sys.stdout.flush()
@@ -56,9 +56,9 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
             _, filtered = mic.read_filtered()
             db = rms_db(filtered)
             slam_samples.append(db)
-            if progress is not None:
-                progress("tap", elapsed if "elapsed" in locals() else 0, duration, db)
             elapsed = time.monotonic() - start
+            if progress is not None:
+                progress("tap", elapsed, duration, db)
             bar_len = int((elapsed / duration) * 30)
             spike = " <-- SLAM" if db > noise_floor + 10 else ""
             sys.stdout.write(f"\r  [{('#' * bar_len).ljust(30)}] {db:.1f} dB{spike}")
