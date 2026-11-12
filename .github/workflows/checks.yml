@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/terminal-first-tui
 
 jobs:
   python:
@@ -34,6 +33,13 @@ jobs:
                   assert name in archive.namelist(), f"Missing in wheel: {name}"
           print("Wheel includes bundled OpenTUI files")
           PY
+      - name: Install wheel in a clean virtual environment
+        run: |
+          python -m venv --system-site-packages /tmp/tabletap-wheelcheck
+          /tmp/tabletap-wheelcheck/bin/pip install --no-deps dist/tabletap*.whl
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/python -c "import tabletap; from pathlib import Path; p = Path(tabletap.__file__).parent / 'ui' / 'index.tsx'; assert p.is_file(), p; print('Installed wheel UI:', p)")
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap --help)
+          (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap doctor)
   tui:
     runs-on: ubuntu-latest
     steps:
