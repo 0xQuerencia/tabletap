@@ -12,6 +12,20 @@ from .calibrate import calibrate
 from .filter import AdaptiveThreshold
 
 
+def _prepare_ui():
+    """Copy bundled TUI sources into a user-writable cache directory."""
+    from . import __version__
+    bundled = Path(__file__).resolve().parent / "ui"
+    if not (bundled / "index.tsx").exists():
+        raise FileNotFoundError("TableTap OpenTUI resources are missing from this installation")
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    ui = base / "tabletap" / ("ui-v" + __version__)
+    ui.mkdir(parents=True, exist_ok=True)
+    for name in ("index.tsx", "package.json", "tsconfig.json", "bunfig.toml"):
+        shutil.copy2(bundled / name, ui / name)
+    return ui
+
+
 def monitor_cmd(cfg: dict):
     import time
     from .mic import MicCapture, rms_db
@@ -188,7 +202,7 @@ def main():
         from .config import validate_config
         dest = init_config()
         bun = shutil.which("bun")
-        ui = Path(__file__).resolve().parent.parent / "tui"
+        ui = _prepare_ui()
         installed = (ui / "node_modules" / "@opentui").is_dir()
 
         if args.command == "setup":
@@ -247,7 +261,7 @@ def main():
             print("[tabletap] Bun is required for the OpenTUI interface.")
             print("Install Bun: https://bun.sh then run: cd tui && bun install")
             sys.exit(1)
-        ui = Path(__file__).resolve().parent.parent / "tui" / "index.tsx"
+        ui = _prepare_ui() / "index.tsx"
         if not ui.exists():
             print("[tabletap] TUI sources not found. Run from an editable checkout (pip install -e .).", file=sys.stderr)
             sys.exit(1)
