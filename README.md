@@ -19,15 +19,15 @@ cd tabletap
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-cd tui && bun install && cd ..
+tabletap setup
 tabletap
 ```
 
-The first launch copies an editable YAML configuration to
+Setup copies an editable YAML configuration to
 `~/.config/tabletap/config.yaml` (or `$XDG_CONFIG_HOME/tabletap/config.yaml`).
 You can also explicitly launch `tabletap tui`.
 
-**Preview the interface without a microphone or executing actions:**
+Run `tabletap doctor` to check your microphone, Bun installation and keyboard tooling.\n\n**Preview the interface without a microphone or executing actions:**
 
 ```bash
 tabletap tui --demo
