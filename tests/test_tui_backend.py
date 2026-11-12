@@ -95,3 +95,12 @@ def test_wayland_prefers_wtype_without_uinput_privileges():
     run.assert_called_once()
     assert run.call_args.args[0] == ["wtype", "-M", "alt", "-k", "Tab", "-m", "alt"]
     runner.shutdown()
+
+
+def test_bridge_serializes_numpy_boolean(capsys):
+    import numpy as np
+    emit("level", db=np.float64(-23.3), spike=np.bool_(True))
+    data = json.loads(capsys.readouterr().out)
+    assert data["type"] == "level"
+    assert data["spike"] is True
+    assert round(data["db"], 1) == -23.3
