@@ -11,7 +11,7 @@ from .pattern import PatternDetector
 from .action import ActionRunner
 from .calibrate import auto_calibrate
 from .lock import PIDLock
-from .config import load_config
+from .config import load_config, save_calibration
 
 log = logging.getLogger("tabletap")
 
@@ -59,8 +59,16 @@ class Daemon:
     def _reload_config(self):
         try:
             log.info("Reloading configuration...")
-            self.cfg = load_config()
-            self._build_components()
+            new_cfg = load_config()
+            old_cfg, old_runner = self.cfg, self.action_runner
+            self.cfg = new_cfg
+            try:
+                self._build_components()
+            except Exception:
+                self.cfg = old_cfg
+                self.action_runner = old_runner
+                raise
+            old_runner.shutdown()
             log.info("Configuration reloaded successfully (threshold: %.1f dB)", 
                      self.threshold.threshold_db)
             self._needs_reload = False
@@ -81,6 +89,7 @@ class Daemon:
         if self.detect_cfg.get("threshold_db") is None and self.detect_cfg.get("noise_floor_db") is None:
             log.info("No calibration found, running auto-calibrate...")
             result = auto_calibrate(self.cfg)
+            save_calibration(self.cfg, result)
             self.threshold.set_from_calibration(result["noise_floor_db"], result["slam_peak_db"])
             log.info("Auto-calibration done: noise=%.1f peak=%.1f threshold=%.1f",
                      result["noise_floor_db"], result["slam_peak_db"], self.threshold.threshold_db)
@@ -100,10 +109,12 @@ class Daemon:
                     now = time.monotonic()
 
                     is_spike = self.threshold.is_above(db)
+                    # Feed the onset detector for quiet frames too, otherwise
+                    # its baseline stays stale and isolated taps are missed.
+                    detected = self.onset.feed(db, now)
 
                     if is_spike:
                         self.threshold.update(db, True)
-                        detected = self.onset.feed(db, now)
                         if detected:
                             event = self.pattern_detector.feed()
                             if event:
