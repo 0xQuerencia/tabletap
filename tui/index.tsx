@@ -117,6 +117,8 @@ function App() {
   const [commandText, setCommandText] = createSignal("")
   const [help, setHelp] = createSignal(false)
   const [calibrating, setCalibrating] = createSignal(false)
+  const [calPhase, setCalPhase] = createSignal("ready")
+  const [calProgress, setCalProgress] = createSignal(0)
   let editInput: InputRenderable | null = null
   let commandInput: InputRenderable | null = null
   let bridge: ReturnType<typeof Bun.spawn> | null = null
@@ -296,26 +298,72 @@ function App() {
     if (calibrating()) return
     await stopBridge()
     setCalibrating(true)
+    setCalPhase("noise")
+    setCalProgress(0)
     setState("CALIBRATING")
     setPage(2)
-    setNotice("Calibration phase 1: stay quiet. Phase 2: tap desk 5–10 times.")
+    setNotice("Calibration: stay quiet for the first phase.")
+    let errorMessage = ""
     try {
-      const proc = Bun.spawn([PYTHON, "-u", "-m", "tabletap", "calibrate"], {
-        stdout: "ignore", stderr: "ignore", stdin: "ignore",
+      const proc = Bun.spawn([PYTHON, "-u", "-m", "tabletap", "bridge", "--calibrate"], {
+        stdout: "pipe", stderr: "ignore", stdin: "ignore",
       })
       calibration = proc
+      const consume = async () => {
+        if (!proc.stdout || typeof proc.stdout === "number") return
+        const reader = proc.stdout.getReader()
+        const decoder = new TextDecoder()
+        let pending = ""
+        while (true) {
+          const part = await reader.read()
+          if (part.done) break
+          pending += decoder.decode(part.value, { stream: true })
+          const lines = pending.split("\n")
+          pending = lines.pop() || ""
+          for (const line of lines) {
+            if (calibration !== proc || !line.trim()) continue
+            let data: Record<string, unknown>
+            try {
+              data = JSON.parse(line)
+            } catch {
+              continue
+            }
+            if (data.type === "calibration_progress") {
+              const phase = String(data.phase)
+              setCalPhase(phase)
+              setCalProgress(Math.max(0, Math.min(100, Math.round(
+                Number(data.elapsed || 0) / Math.max(0.01, Number(data.duration || 5)) * 100,
+              ))))
+              if (typeof data.db === "number") setLevel(data.db)
+              setNotice(phase === "noise" ? "Stay quiet while measuring room noise…" :
+                phase === "tap" ? "TAP YOUR DESK 5–10 TIMES NOW." :
+                "Get ready to tap your desk…")
+            } else if (data.type === "calibration_done") {
+              setConfig(readConfig())
+              setThreshold(Number(data.threshold_db))
+              setCalPhase("done")
+              setCalProgress(100)
+              addLog("Calibration completed")
+              setNotice("Calibration saved. Press space to start listening.")
+            } else if (data.type === "error") {
+              errorMessage = String(data.message || "Unknown calibration error")
+            }
+          }
+        }
+      }
+      const consumed = consume()
       const result = await proc.exited
+      await consumed
       calibration = null
-      if (result === 0) {
-        setConfig(readConfig())
-        setNotice("Calibration saved. Press space to start listening.")
-        addLog("Calibration completed")
-      } else {
-        setNotice("Calibration failed (code " + result + "). Check your microphone.")
+      if (result !== 0) {
+        setCalPhase("failed")
+        setNotice("Calibration failed: " + (errorMessage || "microphone unavailable"))
       }
     } catch (error) {
+      setCalPhase("failed")
       setNotice("Calibration failed: " + String(error))
     } finally {
+      calibration = null
       setCalibrating(false)
       setState("STOPPED")
     }
@@ -518,6 +566,8 @@ function App() {
             <text fg={theme.dim}>Saved noise floor: {config().detection?.noise_floor_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Saved tap peak:    {config().detection?.slam_peak_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Current threshold: {threshold()} dB</text>
+            <text fg={theme.accent}>Phase: {calPhase().toUpperCase()}  {calProgress()}%</text>
+            <text fg={theme.good}>{"━".repeat(Math.round(calProgress() / 5))}<span style={{ fg: theme.border }}>{"┄".repeat(20 - Math.round(calProgress() / 5))}</span></text>
           </box>
           <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? "● Calibration in progress… tap when instructed" : "Press c to begin calibration"}</text>
         </box>
