@@ -17,8 +17,9 @@ log = logging.getLogger("tabletap")
 
 
 class Daemon:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, category: str | None = None):
         self.cfg = cfg
+        self.category = category
         self._running = False
         self._needs_reload = False
         self.lock = PIDLock()
@@ -29,7 +30,7 @@ class Daemon:
         self.filter_cfg = self.cfg.get("filter", {})
         self.detect_cfg = self.cfg.get("detection", {})
         self.feedback_cfg = self.cfg.get("feedback", {})
-        self.action_runner = ActionRunner(self.cfg.get("actions", {}))
+        self.action_runner = ActionRunner(self.cfg.get("actions", {}), category=self.category)
         self.pattern_detector = PatternDetector(
             min_gap_ms=self.detect_cfg.get("min_gap_ms", 150),
             rhythm_window_ms=self.detect_cfg.get("rhythm_window_ms", 800),
@@ -99,28 +100,28 @@ class Daemon:
 
                     is_spike = self.threshold.is_above(db)
 
-                if is_spike:
-                    self.threshold.update(db, True)
-                    detected = self.onset.feed(db, now)
-                    if detected:
-                        event = self.pattern_detector.feed()
+                    if is_spike:
+                        self.threshold.update(db, True)
+                        detected = self.onset.feed(db, now)
+                        if detected:
+                            event = self.pattern_detector.feed()
+                            if event:
+                                log.info("TAP -> %s (threshold: %.1f dB)", event.key(), self.threshold.threshold_db)
+                                self._notify(event.key())
+                                self.action_runner.run(event.key())
+                    else:
+                        self.threshold.update(db, False)
+                        event = self.pattern_detector.on_silence()
                         if event:
-                            log.info("TAP -> %s (threshold: %.1f dB)", event.key(), self.threshold.threshold_db)
+                            log.info("HOLD -> %s", event.key())
                             self._notify(event.key())
                             self.action_runner.run(event.key())
-                else:
-                    self.threshold.update(db, False)
-                    event = self.pattern_detector.on_silence()
-                    if event:
-                        log.info("HOLD -> %s", event.key())
-                        self._notify(event.key())
-                        self.action_runner.run(event.key())
 
-                timeout_event = self.pattern_detector.check_window_timeout()
-                if timeout_event:
-                    log.info("RHYTHM -> %s", timeout_event.key())
-                    self._notify(timeout_event.key())
-                    self.action_runner.run(timeout_event.key())
+                    timeout_event = self.pattern_detector.check_window_timeout()
+                    if timeout_event:
+                        log.info("RHYTHM -> %s", timeout_event.key())
+                        self._notify(timeout_event.key())
+                        self.action_runner.run(timeout_event.key())
         except MicDisconnected as e:
             log.error("Microphone permanently disconnected: %s", e)
             self.lock.release()
