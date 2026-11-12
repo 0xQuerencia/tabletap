@@ -22,3 +22,7 @@ dev = ["pytest>=8.0", "pytest-mock>=3.0"]
 
 [tool.setuptools.package-data]
 tabletap = ["default_config.yaml"]
+
+[tool.setuptools.packages.find]
+include = ["tabletap*"]
+exclude = ["tui*", "tests*"]
