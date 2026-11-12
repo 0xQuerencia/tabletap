@@ -98,9 +98,9 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
             last_level_at = 0.0
             while running:
                 _raw, filtered = mic.read_filtered()
-                db = rms_db(filtered)
+                db = float(rms_db(filtered))
                 now = time.monotonic()
-                spike = db > threshold.threshold_db + sensitivity_offset
+                spike = bool(db > threshold.threshold_db + sensitivity_offset)
                 # Feed the energy derivative on *every* chunk. Skipping silence
                 # otherwise leaves the onset detector with stale energy.
                 started = onset.feed(db, now)
