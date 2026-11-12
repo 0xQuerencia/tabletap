@@ -65,7 +65,6 @@ def monitor_cmd(cfg: dict):
                 bar = "#" * min(bar_len, 50)
 
                 print(f"\r  {db:6.1f} dB |{bar.ljust(50)}|{spike}", end="", flush=True)
-                time.sleep(0.05)
     except KeyboardInterrupt:
         print("\n\n[tabletap monitor] Stopped.")
 
@@ -112,10 +111,11 @@ def test_cmd(cfg: dict, duration: int):
                 now = time.monotonic()
 
                 is_spike = threshold.is_above(db)
+                # Keep the onset baseline updated during silence too.
+                detected = onset.feed(db, now)
 
                 if is_spike:
                     threshold.update(db, True)
-                    detected = onset.feed(db, now)
                     if detected:
                         event = pattern_detector.feed()
                         if event:
@@ -142,7 +142,6 @@ def test_cmd(cfg: dict, duration: int):
                 remaining = duration - elapsed
                 print(f"\r  [{remaining:2d}s] {db:6.1f} dB (thr: {threshold.threshold_db:.1f}) |{bar.ljust(50)}|{spike}", end="", flush=True)
 
-                time.sleep(0.05)
     except KeyboardInterrupt:
         pass
 
