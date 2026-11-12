@@ -162,6 +162,8 @@ def main():
     init_p.add_argument("--path", help="Custom destination path")
 
     sub.add_parser("status", help="Show current config and device info")
+    sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
+    sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
     bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
     bridge_p.add_argument("-c", "--config", help="Path to config.yaml")
     bridge_p.add_argument("--category", help="Action category")
@@ -180,6 +182,64 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command in ("setup", "doctor"):
+        from .config import init_config
+        from .config import validate_config
+        dest = init_config()
+        bun = shutil.which("bun")
+        ui = Path(__file__).resolve().parent.parent / "tui"
+        installed = (ui / "node_modules" / "@opentui").is_dir()
+
+        if args.command == "setup":
+            if not bun:
+                print("[tabletap] Bun missing. Install Bun from https://bun.sh")
+                sys.exit(1)
+            if not (ui / "package.json").exists():
+                print("[tabletap] TUI source is missing. Use an editable checkout.", file=sys.stderr)
+                sys.exit(1)
+            print("[tabletap] Config: " + str(dest))
+            print("[tabletap] Installing OpenTUI dependencies…")
+            sys.exit(subprocess.call([bun, "install"], cwd=ui))
+
+        import platform
+        print("TableTap diagnostics")
+        print("  Python: " + platform.python_version())
+        print("  Config: " + str(dest))
+        try:
+            cfg = load_config(dest)
+            warnings = validate_config(cfg)
+            print("  Config valid: " + ("yes" if not warnings else "warnings"))
+            for warning in warnings:
+                print("    WARNING: " + warning)
+        except Exception as exc:
+            print("  Config: ERROR " + str(exc))
+        print("  Bun: " + (bun or "MISSING (install Bun)"))
+        print("  TUI sources: " + ("yes" if (ui / "index.tsx").exists() else "NO"))
+        print("  TUI packages: " + ("installed" if installed else "MISSING (tabletap setup)"))
+        print("  Display: " + ("Wayland" if os.environ.get("WAYLAND_DISPLAY") else
+                              "X11" if os.environ.get("DISPLAY") else "headless"))
+        keytool = "ydotool" if os.environ.get("WAYLAND_DISPLAY") else "xdotool"
+        print("  Key tool: " + (shutil.which(keytool) or "MISSING (" + keytool + ")"))
+        try:
+            from .mic import pyaudio
+            if pyaudio is None:
+                raise RuntimeError("pyaudio not installed")
+            pa = pyaudio.PyAudio()
+            try:
+                inputs = [
+                    pa.get_device_info_by_index(index)
+                    for index in range(pa.get_device_count())
+                    if pa.get_device_info_by_index(index).get("maxInputChannels", 0) > 0
+                ]
+                print("  Microphone devices: " + str(len(inputs)))
+                for item in inputs[:6]:
+                    print("    - " + str(item.get("name", "?")))
+            finally:
+                pa.terminate()
+        except Exception as exc:
+            print("  Microphone: unavailable: " + str(exc))
+        return
 
     if args.command == "tui":
         bun = shutil.which("bun")
