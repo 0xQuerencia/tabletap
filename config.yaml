@@ -40,6 +40,9 @@ actions:
   triple:
     type: exec
     value: "xdg-open https://youtube.com"
+  quadruple:
+    type: key
+    value: alt+tab
   long:          # 500ms-2s
     type: key
     value: alt+tab
