@@ -1,6 +1,10 @@
 import argparse
 import logging
 import sys
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
 from .config import load_config, init_config, save_calibration
 from .daemon import Daemon
@@ -158,6 +162,12 @@ def main():
     init_p.add_argument("--path", help="Custom destination path")
 
     sub.add_parser("status", help="Show current config and device info")
+    bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
+    bridge_p.add_argument("-c", "--config", help="Path to config.yaml")
+    bridge_p.add_argument("--category", help="Action category")
+    bridge_p.add_argument("--dry-run", action="store_true", help="Detect but do not execute")
+    tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
+    tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
     args = parser.parse_args()
 
@@ -167,8 +177,35 @@ def main():
         return
 
     if args.command is None:
-        parser.print_help()
-        return
+        args.command = "tui"
+        args.demo = False
+
+    if args.command == "tui":
+        bun = shutil.which("bun")
+        if not bun:
+            print("[tabletap] Bun is required for the OpenTUI interface.")
+            print("Install Bun: https://bun.sh then run: cd tui && bun install")
+            sys.exit(1)
+        ui = Path(__file__).resolve().parent.parent / "tui" / "index.tsx"
+        if not ui.exists():
+            print("[tabletap] TUI sources not found. Run from an editable checkout (pip install -e .).", file=sys.stderr)
+            sys.exit(1)
+        from .config import init_config
+        init_config()
+        env = os.environ.copy()
+        env["TABLETAP_PYTHON"] = sys.executable
+        cmd = [bun, "run", str(ui)]
+        if args.demo:
+            cmd.append("--demo")
+        sys.exit(subprocess.call(cmd, cwd=str(ui.parent), env=env))
+
+    if args.command == "bridge":
+        from .bridge import run_bridge
+        sys.exit(run_bridge(
+            config_path=args.config,
+            category=args.category,
+            dry_run=args.dry_run,
+        ))
 
     try:
         cfg = load_config(args.config if hasattr(args, "config") else None)
