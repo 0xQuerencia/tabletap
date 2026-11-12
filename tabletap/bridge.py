@@ -143,6 +143,11 @@ def run_calibration(config_path=None) -> int:
         init_config()
     cfg = load_config(config_path)
     output = sys.stdout
+    lock = PIDLock()
+    if not lock.acquire():
+        print(json.dumps({"type": "error", "message": "Another TableTap listener is running. Stop it before calibration."}),
+              file=output, flush=True)
+        return 3
     last_progress_at = 0.0
 
     def progress(phase, elapsed, duration, db):
@@ -172,3 +177,5 @@ def run_calibration(config_path=None) -> int:
         print(json.dumps({"type": "error", "message": str(exc)}),
               file=output, flush=True)
         return 1
+    finally:
+        lock.release()
