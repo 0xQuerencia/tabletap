@@ -109,7 +109,7 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
                 spike = bool(db > threshold.threshold_db + sensitivity_offset)
                 # Feed the energy derivative on *every* chunk. Skipping silence
                 # otherwise leaves the onset detector with stale energy.
-                started = onset.feed(db, now)
+                started = onset.feed(db, now, active=spike)
                 if spike and started:
                     handle(pattern.feed())
                 elif not spike:
