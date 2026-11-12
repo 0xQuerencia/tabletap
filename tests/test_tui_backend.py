@@ -74,3 +74,24 @@ def test_category_four_taps_routes_fourth_action():
     }, category="media")
     assert runner._get_action("quadruple")["value"] == "XF86AudioRaiseVolume"
     runner.shutdown()
+
+
+def test_wayland_wtype_key_chord():
+    runner = ActionRunner({})
+    assert runner._convert_to_wtype_format(["super", "Left"]) == [
+        "-M", "logo", "-k", "Left", "-m", "logo",
+    ]
+    assert runner._convert_to_wtype_format(["ctrl", "alt", "t"]) == [
+        "-M", "ctrl", "-M", "alt", "-k", "t", "-m", "alt", "-m", "ctrl",
+    ]
+    runner.shutdown()
+
+
+def test_wayland_prefers_wtype_without_uinput_privileges():
+    runner = ActionRunner({})
+    with patch("tabletap.action.shutil.which", side_effect=lambda cmd: cmd if cmd == "wtype" else None):
+        with patch("tabletap.action.subprocess.run") as run:
+            runner._press_key_wayland(["alt", "Tab"])
+    run.assert_called_once()
+    assert run.call_args.args[0] == ["wtype", "-M", "alt", "-k", "Tab", "-m", "alt"]
+    runner.shutdown()
