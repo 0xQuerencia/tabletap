@@ -21,7 +21,7 @@ tabletap = "tabletap.__main__:main"
 dev = ["pytest>=8.0", "pytest-mock>=3.0"]
 
 [tool.setuptools.package-data]
-tabletap = ["default_config.yaml"]
+tabletap = ["default_config.yaml", "ui/*.tsx", "ui/*.json", "ui/*.toml"]
 
 [tool.setuptools.packages.find]
 include = ["tabletap*"]
