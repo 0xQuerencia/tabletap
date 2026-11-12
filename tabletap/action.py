@@ -99,7 +99,7 @@ class ActionRunner:
                 "single": 1,
                 "double": 2,
                 "triple": 3,
-                "long": 4,
+                "quadruple": 4,
             }
             num = number_map.get(key)
             if num and num in self._category_map:
