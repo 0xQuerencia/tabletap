@@ -26,8 +26,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Install TUI dependencies
-        run: cd tui && bun install
+        run: cd tabletap/ui && bun install
       - name: Typecheck OpenTUI
-        run: cd tui && bunx tsc --noEmit
+        run: cd tabletap/ui && bunx tsc --noEmit
       - name: Launch/exit OpenTUI in a terminal
-        run: python tui/smoke_test.py
+        run: python tests/smoke_tui.py
