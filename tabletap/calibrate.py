@@ -83,7 +83,7 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
     else:
         threshold = noise_floor + 6
     if margin_db is not None:
-        threshold += margin_db
+        threshold = max(noise_floor, min(threshold + margin_db, slam_peak + margin_db))
 
     print(f"[tabletap] Noise floor:  {noise_floor:.1f} dB")
     print(f"[tabletap] Slam peak:    {slam_peak:.1f} dB")
