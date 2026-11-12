@@ -25,7 +25,7 @@ tabletap
 
 Setup copies an editable YAML configuration to
 `~/.config/tabletap/config.yaml` (or `$XDG_CONFIG_HOME/tabletap/config.yaml`).
-You can also explicitly launch `tabletap tui`.
+You can also explicitly launch `tabletap tui`. See the [Arch/CachyOS/Hyprland installation guide](docs/INSTALL_ARCH.md) for audio permissions, Wayland shortcuts and verification.
 
 Run `tabletap doctor` to check your microphone, Bun installation and keyboard tooling.
 
