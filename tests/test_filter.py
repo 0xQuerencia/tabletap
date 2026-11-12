@@ -136,3 +136,14 @@ def test_onset_detector_allows_onset_after_gap():
     
     result = detector.feed(-30.0, 0.2)
     assert result
+
+
+def test_quiet_energy_rise_does_not_consume_tap_debounce():
+    detector = OnsetDetector(min_gap_ms=150)
+    assert not detector.feed(-60.0, 0.0, active=False)
+    assert not detector.feed(-54.0, 0.10, active=False)
+    assert detector.feed(-20.0, 0.20, active=True)
+    assert not detector.feed(-62.0, 0.35, active=False)
+    # This spurious 5 dB quiet rise must not block the next tap at 0.73.
+    assert not detector.feed(-57.0, 0.66, active=False)
+    assert detector.feed(-20.0, 0.73, active=True)
