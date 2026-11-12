@@ -64,3 +64,13 @@ def test_daemon_accepts_selected_category():
         daemon = Daemon({"actions": {"media": {1: {"type": "exec", "value": "true"}}}}, category="media")
     assert daemon.action_runner.category == "media"
     daemon.action_runner.shutdown()
+
+
+def test_category_four_taps_routes_fourth_action():
+    runner = ActionRunner({
+        "media": {
+            4: {"type": "key", "value": "XF86AudioRaiseVolume"},
+        },
+    }, category="media")
+    assert runner._get_action("quadruple")["value"] == "XF86AudioRaiseVolume"
+    runner.shutdown()
