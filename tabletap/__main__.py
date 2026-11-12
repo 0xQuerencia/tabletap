@@ -112,7 +112,7 @@ def test_cmd(cfg: dict, duration: int):
 
                 is_spike = threshold.is_above(db)
                 # Keep the onset baseline updated during silence too.
-                detected = onset.feed(db, now)
+                detected = onset.feed(db, now, active=is_spike)
 
                 if is_spike:
                     threshold.update(db, True)
