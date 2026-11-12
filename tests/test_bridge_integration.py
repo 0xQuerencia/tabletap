@@ -5,6 +5,7 @@ the output and action-dispatch paths remain production code.
 """
 import json
 from unittest.mock import patch
+from contextlib import ExitStack
 
 import numpy as np
 
@@ -69,7 +70,11 @@ def simulate(trace, capsys, category=None):
             },
         },
     }
-    with patch("tabletap.bridge.MicCapture", FakeMic),          patch("tabletap.bridge.load_config", return_value=cfg),          patch("tabletap.bridge.rms_db", side_effect=lambda _: current["db"]),          patch("tabletap.bridge.time.monotonic", side_effect=lambda: current["now"]):
+    with ExitStack() as stack:
+        stack.enter_context(patch("tabletap.bridge.MicCapture", FakeMic))
+        stack.enter_context(patch("tabletap.bridge.load_config", return_value=cfg))
+        stack.enter_context(patch("tabletap.bridge.rms_db", side_effect=lambda _: current["db"]))
+        stack.enter_context(patch("tabletap.bridge.time.monotonic", side_effect=lambda: current["now"]))
         run_bridge(config_path="/synthetic", category=category, dry_run=True)
     return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
