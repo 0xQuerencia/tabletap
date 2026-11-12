@@ -101,6 +101,7 @@ First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns 
 | Single tap | 1 tap within 800ms | Launch Spotify |
 | Double tap | 2 taps within 800ms | Open Gmail |
 | Triple tap | 3 taps within 800ms | Open YouTube |
+| Four taps | 4 taps within 800ms | Alt+Tab |
 | Long press | 500ms-2s hold | Alt+Tab |
 | Medium hold | 2s-4s hold | Volume +5% |
 | Extended hold | 4s+ hold | Lock screen |
@@ -201,7 +202,7 @@ actions:
       value: "XF86AudioNext"
 ```
 
-Single tap = action 1, double tap = action 2, triple tap = action 3.
+Single tap = action 1, double tap = action 2, triple tap = action 3, four taps = action 4.
 
 ## Systemd service
 
