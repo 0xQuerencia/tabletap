@@ -130,3 +130,44 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         signal.signal(signal.SIGTERM, previous_term)
         emit("stopped")
     return 0
+
+
+def run_calibration(config_path=None) -> int:
+    """Calibrate through machine-readable progress events for the TUI."""
+    from contextlib import redirect_stdout
+    from .calibrate import calibrate
+    from .config import save_calibration
+
+    if config_path is None:
+        init_config()
+    cfg = load_config(config_path)
+    output = sys.stdout
+    last_progress_at = 0.0
+
+    def progress(phase, elapsed, duration, db):
+        nonlocal last_progress_at
+        now = time.monotonic()
+        if elapsed and now - last_progress_at < 0.12:
+            return
+        last_progress_at = now
+        record = {
+            "type": "calibration_progress", "phase": phase,
+            "elapsed": round(elapsed, 2), "duration": duration,
+        }
+        if db is not None:
+            record["db"] = round(db, 1)
+        print(json.dumps(record), file=output, flush=True)
+
+    try:
+        # calibrate() includes human-readable prompts for the old CLI. Keep
+        # them on stderr so stdout remains a JSONL-only protocol for OpenTUI.
+        with redirect_stdout(sys.stderr):
+            result = calibrate(cfg, progress=progress)
+        save_calibration(cfg, result, config_path)
+        print(json.dumps({"type": "calibration_done", **result}),
+              file=output, flush=True)
+        return 0
+    except (OSError, ImportError, ValueError) as exc:
+        print(json.dumps({"type": "error", "message": str(exc)}),
+              file=output, flush=True)
+        return 1
