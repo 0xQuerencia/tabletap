@@ -60,6 +60,7 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         medium_hold_ms=detection.get("medium_hold_ms", 2000),
         long_hold_ms=detection.get("long_hold_ms", 4000),
         hold_repeat_ms=detection.get("hold_repeat_ms", 500),
+        enable_hold=detection.get("enable_hold_gestures", False),
     )
     onset = OnsetDetector(min_gap_ms=detection.get("min_gap_ms", 150))
     runner = ActionRunner(cfg.get("actions", {}), category=category)
