@@ -49,6 +49,7 @@ function readConfig(): TableConfig {
   }
 }
 function saveConfig(config: TableConfig) {
+  if (IS_DEMO) return // A preview must never overwrite actual user mappings.
   mkdirSync(dirname(CONFIG), { recursive: true })
   writeFileSync(CONFIG, YAML.stringify(config), { mode: 0o600 })
 }
@@ -61,6 +62,7 @@ function loadProfile() {
   }
 }
 function saveProfile(profile: string) {
+  if (IS_DEMO) return
   mkdirSync(dirname(PREFS), { recursive: true })
   writeFileSync(PREFS, JSON.stringify({ profile }) + "\n", { mode: 0o600 })
 }
@@ -104,7 +106,7 @@ function App() {
   const [config, setConfig] = createSignal<TableConfig>(readConfig())
   const [profile, setProfile] = createSignal(loadProfile())
   const [state, setState] = createSignal(IS_DEMO ? "DEMO" : "STOPPED")
-  const [preview, setPreview] = createSignal(false)
+  const [preview, setPreview] = createSignal(IS_DEMO)
   const [level, setLevel] = createSignal(-80)
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
