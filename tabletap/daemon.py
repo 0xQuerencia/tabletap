@@ -35,6 +35,7 @@ class Daemon:
             min_gap_ms=self.detect_cfg.get("min_gap_ms", 150),
             rhythm_window_ms=self.detect_cfg.get("rhythm_window_ms", 800),
             long_press_ms=self.detect_cfg.get("long_press_ms", 500),
+            enable_hold=self.detect_cfg.get("enable_hold_gestures", False),
         )
         self._notifications_enabled = self.feedback_cfg.get("notifications", True)
         self._notification_urgency = self.feedback_cfg.get("notification_urgency", "low")
