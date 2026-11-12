@@ -243,7 +243,8 @@ function App() {
     const [key] = row
     const next = structuredClone(config())
     if (profile() === "default") {
-      next.actions[key] = { ...next.actions[key], value: editText() }
+      const defaultActions = next.actions as unknown as Record<string, Action>
+      defaultActions[key] = { ...defaultActions[key], value: editText() }
     } else {
       next.actions[profile()][key] = { ...next.actions[profile()][key], value: editText() }
     }
@@ -260,7 +261,10 @@ function App() {
     const options: Action["type"][] = ["exec", "key", "script"]
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     const next = structuredClone(config())
-    if (profile() === "default") next.actions[key] = { ...action, type: nextType }
+    if (profile() === "default") {
+      const defaultActions = next.actions as unknown as Record<string, Action>
+      defaultActions[key] = { ...action, type: nextType }
+    }
     else next.actions[profile()][key] = { ...action, type: nextType }
     saveConfig(next)
     setConfig(next)
