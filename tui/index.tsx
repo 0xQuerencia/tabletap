@@ -276,14 +276,12 @@ function App() {
   }
   function adjustThreshold(increase: number) {
     const next = structuredClone(config())
-    next.detection ||= {}
-    next.detection.threshold_db = Math.max(-80, Math.min(0,
-      (next.detection.threshold_db ?? threshold()) + increase
-    ))
+    next.filter ||= {}
+    const old = Number(next.filter.sensitivity_offset_db || 0)
+    next.filter.sensitivity_offset_db = Math.max(-30, Math.min(30, old + increase))
     saveConfig(next)
     setConfig(next)
-    setThreshold(next.detection.threshold_db)
-    setNotice("Threshold: " + next.detection.threshold_db + " dB")
+    setNotice("Sensitivity offset: " + next.filter.sensitivity_offset_db + " dB")
     if (isListening()) void startBridge()
   }
   async function calibrate() {
@@ -528,7 +526,8 @@ function App() {
             <text fg={theme.text}>Bandpass       {String(config().filter?.low ?? 50)} – {String(config().filter?.high ?? 800)} Hz</text>
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>
-            <text fg={theme.amber}>Threshold      {threshold().toFixed(1)} dB   (+/- adjusts 2 dB)</text>
+            <text fg={theme.amber}>Threshold      {threshold().toFixed(1)} dB   (+/- tunes sensitivity)</text>
+            <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
             <Bar level={threshold()} />
           </box>
           <text fg={theme.dim}>Config is YAML. Changes made here are saved and the listener restarts.</text>
