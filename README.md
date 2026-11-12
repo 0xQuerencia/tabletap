@@ -11,7 +11,7 @@ GPU-native graphical UI framework and is intentionally not used here.
 ## Run the terminal app
 
 Requires Linux, Python 3.10+, a microphone, and Bun (1.3.14+; use the latest
-stable release). In a source checkout:
+stable release). From a source checkout:
 
 ```bash
 git clone https://github.com/0xQuerencia/tabletap
@@ -27,7 +27,9 @@ Setup copies an editable YAML configuration to
 `~/.config/tabletap/config.yaml` (or `$XDG_CONFIG_HOME/tabletap/config.yaml`).
 You can also explicitly launch `tabletap tui`.
 
-Run `tabletap doctor` to check your microphone, Bun installation and keyboard tooling.\n\n**Preview the interface without a microphone or executing actions:**
+Run `tabletap doctor` to check your microphone, Bun installation and keyboard tooling.
+
+**Preview the interface without a microphone or executing actions:**
 
 ```bash
 tabletap tui --demo
@@ -67,7 +69,7 @@ Turn your desk into a button pad using the laptop's built-in microphone. Tap the
 
 ## How it works
 
-tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple) and hold duration (short/medium/long), then mapped to keyboard shortcuts, app launches, or custom scripts.
+tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple/quadruple). Experimental hold recognition is off by default. Events are mapped to keyboard shortcuts, app launches, or custom scripts.
 
 No extra hardware needed. Just your laptop mic and a hard desk surface.
 
