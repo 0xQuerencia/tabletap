@@ -22,7 +22,13 @@ log = logging.getLogger(__name__)
 
 
 def emit(kind: str, **fields) -> None:
-    print(json.dumps({"type": kind, **fields}, separators=(",", ":")), flush=True)
+    def scalar(value):
+        if hasattr(value, "item"):
+            return value.item()  # NumPy scalar to a native JSON type.
+        raise TypeError(f"Unsupported bridge value: {type(value).__name__}")
+
+    print(json.dumps({"type": kind, **fields},
+                     separators=(",", ":"), default=scalar), flush=True)
 
 
 def run_bridge(config_path=None, category=None, dry_run=False) -> int:
