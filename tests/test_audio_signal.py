@@ -79,3 +79,15 @@ def test_real_waveform_triple_tap(capsys):
 def test_real_waveform_background_noise_only(capsys):
     result = stream_audio(synthesize([]), capsys)
     assert not [v for v in result if v["type"] == "gesture"]
+
+
+def test_real_waveform_double_tap(capsys):
+    result = stream_audio(synthesize([0.2, 0.52]), capsys)
+    events = [v for v in result if v["type"] == "gesture"]
+    assert [event["pattern"] for event in events] == ["double"], events
+
+
+def test_real_waveform_four_taps(capsys):
+    result = stream_audio(synthesize([0.2, 0.4, 0.6, 0.8]), capsys)
+    events = [v for v in result if v["type"] == "gesture"]
+    assert [event["pattern"] for event in events] == ["quadruple"], events
