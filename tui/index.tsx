@@ -299,7 +299,7 @@ function App() {
     setNotice("Calibration phase 1: stay quiet. Phase 2: tap desk 5–10 times.")
     try {
       const proc = Bun.spawn([PYTHON, "-u", "-m", "tabletap", "calibrate"], {
-        stdout: "pipe", stderr: "pipe", stdin: "ignore",
+        stdout: "ignore", stderr: "ignore", stdin: "ignore",
       })
       calibration = proc
       const result = await proc.exited
