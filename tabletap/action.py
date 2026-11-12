@@ -166,7 +166,41 @@ class ActionRunner:
             else:
                 print(f"[tabletap] xdotool not found, cannot press: {'+'.join(keys)}")
 
+    def _convert_to_wtype_format(self, keys: list[str]) -> list[str]:
+        # Wayland virtual-keyboard backend: unlike ydotool, wtype usually
+        # does not require a privileged /dev/uinput service.
+        if not keys:
+            raise ValueError("Empty keyboard chord")
+        modifier_map = {"ctrl": "ctrl", "alt": "alt",
+                        "shift": "shift", "super": "logo"}
+        mods = []
+        for key in keys[:-1]:
+            modifier = modifier_map.get(key.lower())
+            if not modifier:
+                raise ValueError(f"Invalid shortcut modifier: {key}")
+            mods.append(modifier)
+        target = keys[-1]
+        argv = []
+        for modifier in mods:
+            argv.extend(["-M", modifier])
+        argv.extend(["-k", target])
+        for modifier in reversed(mods):
+            argv.extend(["-m", modifier])
+        return argv
+
     def _press_key_wayland(self, keys: list[str]):
+        if shutil.which("wtype"):
+            try:
+                subprocess.run(
+                    ["wtype", *self._convert_to_wtype_format(keys)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True,
+                    timeout=3,
+                )
+                return
+            except (ValueError, OSError, subprocess.SubprocessError) as exc:
+                print(f"[tabletap] wtype key failed, trying fallback: {exc}")
         # Use Linux evdev keycodes for real chord events. The previous
         # wlrctl 'keyboard type' invocation typed text such as 'alt+tab'
         # rather than pressing the corresponding shortcut.
