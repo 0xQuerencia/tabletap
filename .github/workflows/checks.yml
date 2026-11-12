@@ -29,3 +29,5 @@ jobs:
         run: cd tui && bun install
       - name: Typecheck OpenTUI
         run: cd tui && bunx tsc --noEmit
+      - name: Launch/exit OpenTUI in a terminal
+        run: python tui/smoke_test.py
