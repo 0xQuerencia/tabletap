@@ -51,3 +51,21 @@ jobs:
         run: cd tabletap/ui && bunx tsc --noEmit
       - name: Launch/exit OpenTUI in a terminal
         run: python tests/smoke_tui.py
+
+  fish-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Fish
+        run: sudo apt-get update && sudo apt-get install -y fish
+      - name: Verify shell-independent virtual environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -c "import sys; assert sys.prefix != sys.base_prefix"
+          .venv/bin/python -m pip --version
+      - name: Verify Fish activation uses active environment
+        run: |
+          fish -c 'source .venv/bin/activate.fish; python -c "import sys; assert sys.prefix != sys.base_prefix"'
