@@ -415,7 +415,9 @@ function App() {
         }
       }, 110)
     } else {
-      void startBridge()
+      // Listening can execute local scripts. Require an explicit Space press.
+      setState("STOPPED")
+      setNotice("Press space to listen · press v first for safe preview")
     }
   })
   onCleanup(() => {
