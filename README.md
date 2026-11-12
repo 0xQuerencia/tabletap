@@ -11,17 +11,40 @@ GPU-native graphical UI framework and is intentionally not used here.
 ## Run the terminal app
 
 Requires Linux, Python 3.10+, a microphone, and Bun (1.3.14+; use the latest
-stable release). From a source checkout:
+stable release). Run these **shell-independent** commands (work in Fish, Bash,
+Zsh, and other shells):
 
-```bash
+```console
 git clone https://github.com/0xQuerencia/tabletap
 cd tabletap
 python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-tabletap setup
-tabletap
+.venv/bin/python -m pip install .
+.venv/bin/tabletap setup
+.venv/bin/tabletap doctor
+.venv/bin/tabletap tui --demo
 ```
+
+Once the demo works, launch the real microphone UI with
+`.venv/bin/tabletap`. This avoids globally managed Python installations
+and any older `~/.local/bin/tabletap` launcher.
+
+If you prefer activating the virtual environment first, the activation
+script is **shell-specific**:
+
+```fish
+# Fish (CachyOS users with fish as their login shell)
+source .venv/bin/activate.fish
+```
+
+```bash
+# Bash / Zsh
+source .venv/bin/activate
+```
+
+After successful activation, `python -m pip install .` and `tabletap`
+will use the virtual environment. If `tabletap` still points to an old
+global launcher, use `.venv/bin/tabletap` directly. Do not use
+`sudo pip` or `--break-system-packages`.
 
 Setup copies an editable YAML configuration to
 `~/.config/tabletap/config.yaml` (or `$XDG_CONFIG_HOME/tabletap/config.yaml`).
@@ -75,11 +98,10 @@ No extra hardware needed. Just your laptop mic and a hard desk surface.
 
 ## Quick start
 
-```bash
-pip install .
-tabletap init          # create config at ~/.config/tabletap/config.yaml
-tabletap calibrate     # calibrate noise floor and slam threshold
-tabletap start         # start listening
+```console
+.venv/bin/tabletap init          # create config at ~/.config/tabletap/config.yaml
+.venv/bin/tabletap calibrate     # calibrate noise floor and tap threshold
+.venv/bin/tabletap start         # start listening (headless)
 ```
 
 First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns your slam intensity.
@@ -243,9 +265,9 @@ kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
 
 ## Development
 
-```bash
-pip install -e ".[dev]"
-pytest tests/ -v
+```console
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pytest tests/ -v
 ```
 
 ## License

@@ -21,18 +21,41 @@ Run `tabletap doctor` to check what's installed.
 
 ## 2. Install TableTap
 
-```bash
+Use explicit virtual-environment binaries so the commands work in **Fish,
+Bash or Zsh** without shell activation. They also avoid CachyOS/Arch's
+externally managed system Python (PEP 668).
+
+```console
 git clone https://github.com/0xQuerencia/tabletap
 cd tabletap
 python -m venv .venv
-source .venv/bin/activate
-python -m pip install .
-tabletap setup
-tabletap doctor
-tabletap tui --demo
+.venv/bin/python -m pip install .
+.venv/bin/tabletap setup
+.venv/bin/tabletap doctor
+.venv/bin/tabletap tui --demo
 ```
 
-When the demo looks correct, run `tabletap`. Press `c` to calibrate.
+If you already cloned TableTap and created `.venv`, **do not clone again**:
+start at the `.venv/bin/python -m pip install .` command from inside the
+repository.
+
+To activate the environment instead, use **Fish**:
+```fish
+source .venv/bin/activate.fish
+```
+
+For **Bash or Zsh**, use `source .venv/bin/activate`.
+
+If you see `case builtin not inside of switch`, you ran the Bash
+activation script in Fish. If you see `externally-managed-environment`,
+the virtual environment was not active and `pip` targeted system Python.
+If `~/.local/bin/tabletap` reports `ModuleNotFoundError: tabletap`,
+you have an older, broken executable on your PATH; invoke
+`.venv/bin/tabletap` explicitly (or activate the environment) rather than
+reinstalling system Python. **Never use `sudo pip` or
+`--break-system-packages`.**
+
+When the demo looks correct, run `.venv/bin/tabletap`. Press `c` to calibrate.
 **Keep the room quiet for the first phase**, then tap 5–10 times when the
 TUI shows **TAP YOUR DESK**. Calibration saves local acoustic thresholds
 in `~/.config/tabletap/config.yaml`.
