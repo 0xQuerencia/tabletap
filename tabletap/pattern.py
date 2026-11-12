@@ -7,6 +7,7 @@ class TapPattern(Enum):
     SINGLE = "single"
     DOUBLE = "double"
     TRIPLE = "triple"
+    QUADRUPLE = "quadruple"
     LONG = "long"
     MEDIUM_HOLD = "medium"
     LONG_HOLD = "extended"
@@ -144,15 +145,17 @@ class PatternDetector:
         elapsed = now - self._first_tap_time
 
         if elapsed > self.rhythm_window:
-            count = min(self._tap_count, 3)
+            count = min(self._tap_count, 4)
             self._tap_count = 0
 
             if count == 1:
                 return TapEvent(TapPattern.SINGLE)
             elif count == 2:
                 return TapEvent(TapPattern.DOUBLE)
-            else:
+            elif count == 3:
                 return TapEvent(TapPattern.TRIPLE)
+            else:
+                return TapEvent(TapPattern.QUADRUPLE)
 
         return None
 
