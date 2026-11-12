@@ -232,8 +232,13 @@ def main():
         print("  TUI packages: " + ("installed" if installed else "MISSING (tabletap setup)"))
         print("  Display: " + ("Wayland" if os.environ.get("WAYLAND_DISPLAY") else
                               "X11" if os.environ.get("DISPLAY") else "headless"))
-        keytool = "ydotool" if os.environ.get("WAYLAND_DISPLAY") else "xdotool"
-        print("  Key tool: " + (shutil.which(keytool) or "MISSING (" + keytool + ")"))
+        if os.environ.get("WAYLAND_DISPLAY"):
+            keytool = shutil.which("wtype") or shutil.which("ydotool")
+            missing = "MISSING (install wtype or ydotool)"
+        else:
+            keytool = shutil.which("xdotool")
+            missing = "MISSING (install xdotool)"
+        print("  Key tool: " + (keytool or missing))
         try:
             from .mic import pyaudio
             if pyaudio is None:
