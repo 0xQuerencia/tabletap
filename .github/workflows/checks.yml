@@ -17,6 +17,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
       - name: Install package and test dependencies
         run: python -m pip install -e ".[dev]"
+      - uses: oven-sh/setup-bun@v2
       - name: Unit tests
         run: python -m pytest -q
       - name: Build wheel
@@ -40,6 +41,12 @@ jobs:
           (cd /tmp && /tmp/tabletap-wheelcheck/bin/python -c "import tabletap; from pathlib import Path; p = Path(tabletap.__file__).parent / 'ui' / 'index.tsx'; assert p.is_file(), p; print('Installed wheel UI:', p)")
           (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap --help)
           (cd /tmp && /tmp/tabletap-wheelcheck/bin/tabletap doctor)
+      - name: Install bundled TUI from wheel
+        run: /tmp/tabletap-wheelcheck/bin/tabletap setup
+      - name: Smoke-test installed TUI (not checkout)
+        env:
+          TABLETAP_SMOKE_COMMAND: /tmp/tabletap-wheelcheck/bin/tabletap tui --demo
+        run: python tests/smoke_tui.py
   tui:
     runs-on: ubuntu-latest
     steps:
