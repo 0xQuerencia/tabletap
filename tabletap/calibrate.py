@@ -42,7 +42,7 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
         raise ValueError("No audio samples received during noise calibration")
     noise_floor = float(np.percentile(noise_samples, 50))
 
-    print(f"\n[tabletap] Phase 2: TYPE AND CLICK as you normally work for {duration} seconds.")
+    print(f"\n[tabletap] Phase 2: TYPE, SPEAK and CLICK normally for {duration} seconds.")
     if progress is not None:
         progress("work", 0, duration, None)
     work_samples = []

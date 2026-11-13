@@ -402,3 +402,23 @@ work-noise audit is clean.
 The 10-minute limit is enforced twice: by the TUI countdown **and**
 independently inside the Python action-capable audio bridge. A frozen terminal
 UI therefore cannot silently keep the bridge armed beyond its authorization.
+
+## Speech/noise suppression (experimental)
+
+The built-in low-frequency impact detector now also checks the **unfiltered**
+microphone spectrum. High-frequency-rich bursts (often speech or ambient
+noise) are vetoed, and the pending tap rhythm is cancelled for 400 ms.
+No AI model, external library, online processing, audio recording, or new
+background service is introduced.
+
+Recalibrate (`c`) and **speak, type, and click normally in phase 2**,
+then make intentional desk knocks in phase 3. Run `tabletap audit -d 60`
+while *speaking* without intentional taps to check false positives.
+The conservative broadband guard is on by default, including existing
+configs. If it incorrectly rejects your actual desk impacts, set
+`detection.broadband_guard: false` in the YAML and test in preview.
+
+A single laptop microphone cannot perfectly identify the source of a
+sound, especially when speech and desk taps overlap spectrally. This
+heuristic should be tested with real recordings from your machine before
+claiming speech is reliably eliminated.
