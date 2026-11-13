@@ -414,9 +414,13 @@ function App() {
     else if (cmd === "stop") void stopBridge()
     else if (cmd === "calibrate") void calibrate()
     else if (cmd === "preview") {
-      setPreview((v) => !v)
-      setNotice(preview() ? "Preview only · commands disabled" : "LIVE ACTIONS ARMED")
-      if (isListening()) void startBridge()
+      if (IS_DEMO) {
+        setNotice("Demo mode is always read-only and never executes actions")
+      } else {
+        setPreview((v) => !v)
+        setNotice(preview() ? "Preview only · commands disabled" : "LIVE ACTIONS ARMED")
+        if (isListening()) void startBridge()
+      }
     } else if (cmd === "profile") {
       const options = getProfiles(config())
       if (arg && options.includes(arg)) {
@@ -482,10 +486,14 @@ function App() {
     else if (key.name === "space") void toggleListener()
     else if (key.name === "p") void selectProfile()
     else if (key.name === "v") {
-      const next = !preview()
-      setPreview(next)
-      setNotice(next ? "Safe preview enabled · commands will NOT execute" : "LIVE ACTIONS ARMED · configured commands can run")
-      if (isListening()) void startBridge()
+      if (IS_DEMO) {
+        setNotice("Demo mode is always read-only and cannot arm live actions")
+      } else {
+        const next = !preview()
+        setPreview(next)
+        setNotice(next ? "Safe preview enabled · commands will NOT execute" : "LIVE ACTIONS ARMED · configured commands can run")
+        if (isListening()) void startBridge()
+      }
     } else if (key.name === "c") void calibrate()
     else if (key.name === "?") setHelp((v) => !v)
     else if (key.name === "/" || key.name === ":") {
