@@ -503,7 +503,7 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>acoustic shortcuts  /  v0.2.0   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.3.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -536,13 +536,13 @@ function App() {
               <text fg={theme.text} attributes={TextAttributes.BOLD}>{state() === "LISTENING" ? "● Listening for taps…" : state() === "PREVIEW" ? "◉ Listening (preview — actions disabled)" : "○ " + state()}</text>
               <text fg={theme.dim}>{profile()} profile</text>
             </box>
-            <text fg={theme.accent}>{waveText()}</text>
+            <text fg={theme.accent}>{narrow() ? waveText().slice(-Math.max(10, dimensions().width - 14)) : waveText()}</text>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.dim}>mic {level()} dB  /  threshold {threshold().toFixed(1)} dB</text>
               <text fg={theme.dim}>{preview() ? "DRY RUN" : "LIVE ACTIONS"}</text>
             </box>
           </box>
-          <box width={Math.min(dimensions().width - 8, 80)} marginTop={1} flexDirection="row" justifyContent="space-between" gap={2}>
+          <box width={panelWidth()} marginTop={1} flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={2}>
             <box width={narrow() ? "100%" : "55%"} backgroundColor={theme.pane} paddingX={2} paddingY={1}>
               <text fg={theme.accent}>ACTIVE MAPPINGS</text>
               <For each={rows().slice(0, 4)}>{([key, action]) =>
