@@ -28,7 +28,7 @@ jobs:
           import zipfile
           wheel = glob.glob("dist/tabletap*.whl")[0]
           with zipfile.ZipFile(wheel) as archive:
-              for name in ("tabletap/ui/index.tsx", "tabletap/ui/package.json",
+              for name in ("tabletap/ui/index.tsx", "tabletap/ui/config-store.ts", "tabletap/ui/package.json",
                            "tabletap/ui/bunfig.toml", "tabletap/default_config.yaml"):
                   assert name in archive.namelist(), f"Missing in wheel: {name}"
           print("Wheel includes bundled OpenTUI files")
@@ -49,6 +49,8 @@ jobs:
         run: cd tabletap/ui && bun install
       - name: Typecheck OpenTUI
         run: cd tabletap/ui && bunx tsc --noEmit
+      - name: Test config editor and profiles
+        run: cd tabletap/ui && bun test ./config-store.test.ts
       - name: Launch/exit OpenTUI in a terminal
         run: python tests/smoke_tui.py
 
