@@ -193,3 +193,11 @@ def test_cli_version_matches_release(monkeypatch, capsys):
         main()
     assert status.value.code == 0
     assert "0.3.0" in capsys.readouterr().out
+
+
+def test_new_config_is_private_to_owner(tmp_path):
+    import stat
+    from tabletap.config import init_config
+
+    path = init_config(tmp_path / "tabletap" / "config.yaml")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
