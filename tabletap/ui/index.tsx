@@ -1,23 +1,27 @@
 import { createSignal, createMemo, For, Show, onCleanup, onMount } from "solid-js"
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { TextAttributes, type InputRenderable } from "@opentui/core"
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import YAML from "yaml"
+import {
+  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
+  type Action, type TableConfig,
+} from "./config-store.ts"
 
-type Action = { name?: string; type?: "key" | "exec" | "script"; value?: string }
-type TableConfig = {
-  actions: Record<string, Record<string, Action>>
-  detection?: Record<string, number>
-  filter?: Record<string, number | boolean>
-  audio?: Record<string, unknown>
+type MicDevice = {
+  index: number
+  name: string
+  default: boolean
+  channels: number
+  sample_rate: number
 }
 
 type BridgeMessage =
   | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
   | { type: "level"; db: number; threshold_db: number; spike: boolean }
   | { type: "gesture"; pattern: string; action: string; dispatched: boolean }
+  | { type: "action_result"; pattern: string; status: "launched" | "failed"; message: string }
   | { type: "error"; message: string }
   | { type: "stopped" }
 
@@ -34,7 +38,6 @@ const theme = {
   pink: "#f2a7c3",
 }
 const PAGES = ["Home", "Actions", "Calibrate", "Settings", "Activity"] as const
-const DEFAULT_PATTERNS = ["single", "double", "triple", "quadruple", "long", "medium", "extended", "repeat"]
 const PYTHON = process.env.TABLETAP_PYTHON || "python3"
 const CONFIG = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "tabletap", "config.yaml")
 const PREFS = join(dirname(CONFIG), "tui.json")
@@ -43,15 +46,10 @@ const WAVE = "▁▂▃▄▅▆▇█"
 
 function readConfig(): TableConfig {
   try {
-    return YAML.parse(readFileSync(CONFIG, "utf8")) as TableConfig
+    return readTableConfig(CONFIG)
   } catch {
     return { actions: {} }
   }
-}
-function saveConfig(config: TableConfig) {
-  if (IS_DEMO) return // A preview must never overwrite actual user mappings.
-  mkdirSync(dirname(CONFIG), { recursive: true })
-  writeFileSync(CONFIG, YAML.stringify(config), { mode: 0o600 })
 }
 function loadProfile() {
   try {
@@ -65,22 +63,6 @@ function saveProfile(profile: string) {
   if (IS_DEMO) return
   mkdirSync(dirname(PREFS), { recursive: true })
   writeFileSync(PREFS, JSON.stringify({ profile }) + "\n", { mode: 0o600 })
-}
-function profilesOf(config: TableConfig): string[] {
-  const categories = Object.entries(config.actions || {})
-    .filter((entry) => Object.keys(entry[1] || {}).some((key) => /^\d+$/.test(key)))
-    .map((entry) => entry[0])
-  return ["default", ...categories]
-}
-function actionsOf(config: TableConfig, profile: string): [string, Action][] {
-  const actions = config.actions || {}
-  if (profile === "default") {
-    return DEFAULT_PATTERNS.map((key) => [key, actions[key] as unknown as Action])
-      .filter((entry) => Boolean(entry[1])) as [string, Action][]
-  }
-  return Object.entries(actions[profile] || {})
-    .filter((entry) => /^\d+$/.test(entry[0]))
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
 }
 function truncate(text: string, width: number): string {
   if (text.length <= width) return text
@@ -106,12 +88,12 @@ function App() {
   const [config, setConfig] = createSignal<TableConfig>(readConfig())
   const [profile, setProfile] = createSignal(loadProfile())
   const [state, setState] = createSignal(IS_DEMO ? "DEMO" : "STOPPED")
-  const [preview, setPreview] = createSignal(IS_DEMO)
+  const [preview, setPreview] = createSignal(true)
   const [level, setLevel] = createSignal(-80)
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
   const [events, setEvents] = createSignal<string[]>([])
-  const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press space to listen")
+  const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press Space for safe preview · c to calibrate")
   const [selected, setSelected] = createSignal(0)
   const [editing, setEditing] = createSignal(false)
   const [editText, setEditText] = createSignal("")
@@ -119,6 +101,7 @@ function App() {
   const [commandText, setCommandText] = createSignal("")
   const [help, setHelp] = createSignal(false)
   const [calibrating, setCalibrating] = createSignal(false)
+  const [micDevices, setMicDevices] = createSignal<MicDevice[]>([])
   const [calPhase, setCalPhase] = createSignal("ready")
   const [calProgress, setCalProgress] = createSignal(0)
   let editInput: InputRenderable | null = null
@@ -126,27 +109,36 @@ function App() {
   let bridge: ReturnType<typeof Bun.spawn> | null = null
   let calibration: ReturnType<typeof Bun.spawn> | null = null
   let demoTimer: ReturnType<typeof setInterval> | null = null
+  let calibrationCancelled = false
+  let listenerRequest = 0
 
   const screens = createMemo(() => PAGES)
-  const rows = createMemo(() => actionsOf(config(), profile()))
+  const narrow = createMemo(() => dimensions().width < 85)
+  const panelWidth = createMemo(() => Math.max(20, Math.min(dimensions().width - 8, 80)))
+  const rows = createMemo(() => getActionRows(config(), profile()))
   const isListening = createMemo(() => state() === "LISTENING" || state() === "PREVIEW")
   const waveText = createMemo(() => wave().map((value) => WAVE[Math.max(0, Math.min(7, value))] || "▁").join(""))
 
   function addLog(entry: string) {
     setEvents((items) => [timeNow() + "  " + entry, ...items].slice(0, 70))
   }
-  async function stopBridge() {
+  async function stopBridge(cancelPending = true) {
+    if (cancelPending) listenerRequest++
     const old = bridge
     bridge = null
     if (old) {
       try {
         old.kill("SIGTERM")
-        await Promise.race([old.exited, new Promise((resolve) => setTimeout(resolve, 1000))])
+        const finished = await Promise.race([
+          old.exited.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200)),
+        ])
+        if (!finished) old.kill("SIGKILL")
       } catch {
         // Process already terminated.
       }
     }
-    if (!IS_DEMO) setState("STOPPED")
+    if (!IS_DEMO && !bridge) setState("STOPPED")
   }
   function onMessage(m: BridgeMessage) {
     if (m.type === "ready") {
@@ -162,6 +154,12 @@ function App() {
     } else if (m.type === "gesture") {
       addLog(m.pattern.toUpperCase() + "  →  " + m.action + (m.dispatched ? "" : " (preview)"))
       setNotice(m.pattern + " tap → " + m.action)
+    } else if (m.type === "action_result") {
+      const resultText = m.status === "failed"
+        ? m.pattern.toUpperCase() + "  FAILED: " + m.message
+        : m.pattern.toUpperCase() + "  command launched"
+      addLog(resultText)
+      setNotice(resultText)
     } else if (m.type === "error") {
       setState("ERROR")
       setNotice(m.message)
@@ -195,7 +193,16 @@ function App() {
   }
   async function startBridge() {
     if (IS_DEMO || calibrating()) return
-    await stopBridge()
+    const ticket = ++listenerRequest
+    await stopBridge(false)
+    if (ticket !== listenerRequest) return
+    try {
+      readTableConfig(CONFIG)
+    } catch (error) {
+      setState("ERROR")
+      setNotice("Invalid configuration: " + String(error))
+      return
+    }
     setState("STARTING")
     setNotice("Opening microphone…")
     const args = [PYTHON, "-u", "-m", "tabletap", "bridge"]
@@ -233,7 +240,7 @@ function App() {
     else await startBridge()
   }
   async function selectProfile() {
-    const options = profilesOf(config())
+    const options = getProfiles(config())
     const next = options[(options.indexOf(profile()) + 1) % options.length] || "default"
     setProfile(next)
     setSelected(0)
@@ -241,22 +248,28 @@ function App() {
     setNotice("Profile: " + next)
     if (isListening()) await startBridge()
   }
+  function saveField(path: (string | number)[], value: string | number | boolean | null, label: string) {
+    try {
+      const updated = updateConfigField(CONFIG, path, value, IS_DEMO)
+      setConfig(updated)
+      setNotice("Saved " + label + " · original backed up as config.yaml.bak")
+      addLog("Updated " + label)
+      if (isListening()) void startBridge()
+      return true
+    } catch (error) {
+      setNotice("Not saved: " + String(error))
+      addLog("Config error: " + String(error))
+      return false
+    }
+  }
   function updateActionValue() {
     const row = rows()[selected()]
     if (!row) return
-    const [key] = row
-    const next = structuredClone(config())
-    if (profile() === "default") {
-      const defaultActions = next.actions as unknown as Record<string, Action>
-      defaultActions[key] = { ...defaultActions[key], value: editText() }
-    } else {
-      next.actions[profile()][key] = { ...next.actions[profile()][key], value: editText() }
+    if (saveField(actionFieldPath(profile(), row[0], "value"), editText(),
+                  profile() + "/" + row[0])) {
+      editInput?.blur()
+      setEditing(false)
     }
-    saveConfig(next)
-    setConfig(next)
-    setEditing(false)
-    addLog("Updated " + profile() + "/" + key)
-    if (isListening()) void startBridge()
   }
   function changeActionType() {
     const row = rows()[selected()]
@@ -264,33 +277,54 @@ function App() {
     const [key, action] = row
     const options: Action["type"][] = ["exec", "key", "script"]
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
-    const next = structuredClone(config())
-    if (profile() === "default") {
-      const defaultActions = next.actions as unknown as Record<string, Action>
-      defaultActions[key] = { ...action, type: nextType }
-    }
-    else next.actions[profile()][key] = { ...action, type: nextType }
-    saveConfig(next)
-    setConfig(next)
-    addLog("Action type → " + nextType)
-    if (isListening()) void startBridge()
+    saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
   }
   function editAction() {
+    if (IS_DEMO) {
+      setNotice("Demo is read-only. Run tabletap without --demo to edit actions.")
+      return
+    }
     const row = rows()[selected()]
     if (!row) return
     setEditText(row[1]?.value || "")
     setEditing(true)
     queueMicrotask(() => editInput?.focus())
   }
+  async function refreshDevices() {
+    try {
+      const proc = Bun.spawn([PYTHON, "-m", "tabletap", "devices", "--json"], {
+        stdout: "pipe", stderr: "ignore", stdin: "ignore",
+      })
+      const body = proc.stdout && typeof proc.stdout !== "number"
+        ? await new Response(proc.stdout).text()
+        : ""
+      const status = await proc.exited
+      if (status === 0) {
+        const parsed: { devices?: MicDevice[] } = JSON.parse(body)
+        setMicDevices(Array.isArray(parsed.devices) ? parsed.devices : [])
+      }
+    } catch {
+      // Doctor provides detailed errors. The dashboard stays usable.
+    }
+  }
+  function cycleMicrophone() {
+    const devices = micDevices()
+    if (devices.length === 0) {
+      setNotice("No microphones discovered · run tabletap doctor")
+      return
+    }
+    const choices: (number | null)[] = [null, ...devices.map((d) => d.index)]
+    const current = config().audio?.device_index
+    const choice = typeof current === "number" ? current : null
+    const next = choices[(choices.indexOf(choice) + 1) % choices.length] ?? null
+    const name = next === null ? "system default" :
+      (devices.find((device) => device.index === next)?.name || "microphone " + next)
+    saveField(["audio", "device_index"], next, "microphone: " + name)
+  }
   function adjustThreshold(increase: number) {
-    const next = structuredClone(config())
-    next.filter ||= {}
-    const old = Number(next.filter.sensitivity_offset_db || 0)
-    next.filter.sensitivity_offset_db = Math.max(-30, Math.min(30, old + increase))
-    saveConfig(next)
-    setConfig(next)
-    setNotice("Sensitivity offset: " + next.filter.sensitivity_offset_db + " dB")
-    if (isListening()) void startBridge()
+    const old = Number(config().filter?.sensitivity_offset_db || 0)
+    const next = Math.max(-30, Math.min(30, old + increase))
+    saveField(["filter", "sensitivity_offset_db"], next, "sensitivity (" + next + " dB)")
   }
   async function calibrate() {
     if (IS_DEMO) {
@@ -300,6 +334,7 @@ function App() {
     if (calibrating()) return
     await stopBridge()
     setCalibrating(true)
+    calibrationCancelled = false
     setCalPhase("noise")
     setCalProgress(0)
     setState("CALIBRATING")
@@ -358,8 +393,9 @@ function App() {
       await consumed
       calibration = null
       if (result !== 0) {
-        setCalPhase("failed")
-        setNotice("Calibration failed: " + (errorMessage || "microphone unavailable"))
+        setCalPhase(calibrationCancelled ? "cancelled" : "failed")
+        setNotice(calibrationCancelled ? "Calibration cancelled. Old settings preserved." :
+                  "Calibration failed: " + (errorMessage || "microphone unavailable"))
       }
     } catch (error) {
       setCalPhase("failed")
@@ -378,15 +414,21 @@ function App() {
     else if (cmd === "stop") void stopBridge()
     else if (cmd === "calibrate") void calibrate()
     else if (cmd === "preview") {
-      setPreview((v) => !v)
-      if (isListening()) void startBridge()
+      if (IS_DEMO) {
+        setNotice("Demo mode is always read-only and never executes actions")
+      } else {
+        setPreview((v) => !v)
+        setNotice(preview() ? "Preview only · commands disabled" : "LIVE ACTIONS ARMED")
+        if (isListening()) void startBridge()
+      }
     } else if (cmd === "profile") {
-      const options = profilesOf(config())
+      const options = getProfiles(config())
       if (arg && options.includes(arg)) {
         setProfile(arg)
         saveProfile(arg)
         if (isListening()) void startBridge()
-      } else void selectProfile()
+      } else if (arg) setNotice("Unknown profile: " + arg + " · valid: " + options.join(", "))
+      else void selectProfile()
     } else if (cmd === "help") setHelp(true)
     else if (cmd === "quit" || cmd === "exit") shutdown()
     else setNotice("Unknown command. Try /help.")
@@ -399,6 +441,18 @@ function App() {
   }
 
   useKeyboard((key) => {
+    if (calibrating() && key.name === "escape") {
+      calibrationCancelled = true
+      calibration?.kill("SIGTERM")
+      setNotice("Cancelling calibration…")
+      key.preventDefault()
+      return
+    }
+    if (calibrating() && key.name !== "q" && !(key.ctrl && key.name === "c")) {
+      // Prevent accidentally starting another mic listener mid-calibration.
+      key.preventDefault()
+      return
+    }
     if (editing()) {
       if (key.name === "escape") {
         setEditing(false)
@@ -432,8 +486,14 @@ function App() {
     else if (key.name === "space") void toggleListener()
     else if (key.name === "p") void selectProfile()
     else if (key.name === "v") {
-      setPreview((v) => !v)
-      if (isListening()) void startBridge()
+      if (IS_DEMO) {
+        setNotice("Demo mode is always read-only and cannot arm live actions")
+      } else {
+        const next = !preview()
+        setPreview(next)
+        setNotice(next ? "Safe preview enabled · commands will NOT execute" : "LIVE ACTIONS ARMED · configured commands can run")
+        if (isListening()) void startBridge()
+      }
     } else if (key.name === "c") void calibrate()
     else if (key.name === "?") setHelp((v) => !v)
     else if (key.name === "/" || key.name === ":") {
@@ -448,13 +508,22 @@ function App() {
     } else if (page() === 3) {
       if (key.name === "+" || key.name === "=") adjustThreshold(2)
       if (key.name === "-") adjustThreshold(-2)
+      if (key.name === "m") cycleMicrophone()
     }
   })
 
   onMount(() => {
-    const current = readConfig()
+    let current: TableConfig
+    try {
+      current = readTableConfig(CONFIG)
+    } catch (error) {
+      setState("ERROR")
+      setNotice("Cannot load config: " + String(error))
+      return
+    }
     setConfig(current)
-    if (!profilesOf(current).includes(profile())) setProfile("default")
+    void refreshDevices()
+    if (!getProfiles(current).includes(profile())) setProfile("default")
     if (IS_DEMO) {
       setState("DEMO")
       let count = 0
@@ -471,7 +540,7 @@ function App() {
     } else {
       // Listening can execute local scripts. Require an explicit Space press.
       setState("STOPPED")
-      setNotice("Press space to listen · press v first for safe preview")
+      setNotice("Press Space to listen safely (preview only) · press v to arm live actions")
     }
   })
   onCleanup(() => {
@@ -484,40 +553,47 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>acoustic shortcuts  /  v0.2.0   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.3.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
-        <For each={screens()}>{(name, i) =>
-          <text fg={page() === i() ? theme.accent : theme.dim}>
-            {page() === i() ? "● " : "  "}{i() + 1} {name}
-          </text>
-        }</For>
+        <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
+          <For each={screens()}>{(name, i) =>
+            <text fg={page() === i() ? theme.accent : theme.dim}>
+              {page() === i() ? "● " : "  "}{i() + 1} {name}
+            </text>
+          }</For>
+        </Show>
       </box>
       <Show when={help()}>
         <box marginTop={1} paddingX={2} paddingY={1} border borderColor={theme.accent} backgroundColor={theme.pane}>
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
           <text fg={theme.text}>1–5 pages  ·  tab next  ·  space start/stop  ·  p profile  ·  v preview</text>
           <text fg={theme.text}>c calibrate  ·  / commands  ·  j/k select action  ·  enter edit  ·  t action type</text>
-          <text fg={theme.text}>+/- threshold on Settings  ·  ? help  ·  q quit</text>
+          <text fg={theme.text}>m microphone on Settings  ·  +/- sensitivity  ·  ? help  ·  q quit</text>
         </box>
       </Show>
       <Show when={page() === 0}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={1}>
-          <ascii_font text="tabletap" font="tiny" />
+          <Show when={!narrow()} fallback={<text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  T A B L E T A P</text>}>
+            <ascii_font text="tabletap" font="tiny" />
+          </Show>
           <text fg={theme.dim}>tap your desk. trigger your workflow.</text>
-          <box width={Math.min(dimensions().width - 8, 80)} marginTop={2} paddingX={2} paddingY={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} gap={1}>
+          <Show when={config().detection?.noise_floor_db === undefined}>
+            <text fg={theme.amber}>Not calibrated yet · press c and follow the two steps</text>
+          </Show>
+          <box width={panelWidth()} marginTop={2} paddingX={2} paddingY={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} gap={1}>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>{state() === "LISTENING" ? "● Listening for taps…" : state() === "PREVIEW" ? "◉ Listening (preview — actions disabled)" : "○ " + state()}</text>
               <text fg={theme.dim}>{profile()} profile</text>
             </box>
-            <text fg={theme.accent}>{waveText()}</text>
+            <text fg={theme.accent}>{narrow() ? waveText().slice(-Math.max(10, dimensions().width - 14)) : waveText()}</text>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.dim}>mic {level()} dB  /  threshold {threshold().toFixed(1)} dB</text>
               <text fg={theme.dim}>{preview() ? "DRY RUN" : "LIVE ACTIONS"}</text>
             </box>
           </box>
-          <box width={Math.min(dimensions().width - 8, 80)} marginTop={1} flexDirection="row" justifyContent="space-between" gap={2}>
-            <box width="55%" backgroundColor={theme.pane} paddingX={2} paddingY={1}>
+          <box width={panelWidth()} marginTop={1} flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={2}>
+            <box width={narrow() ? "100%" : "55%"} backgroundColor={theme.pane} paddingX={2} paddingY={1}>
               <text fg={theme.accent}>ACTIVE MAPPINGS</text>
               <For each={rows().slice(0, 4)}>{([key, action]) =>
                 <text fg={theme.text}>{truncate(key.padEnd(11) + " → " + (action?.name || action?.value || "not assigned"), 37)}</text>
@@ -544,7 +620,7 @@ function App() {
             <box backgroundColor={selected() === i() ? theme.active : "transparent"} paddingLeft={1} paddingY={0}>
               <text fg={selected() === i() ? theme.accent : theme.text}>
                 {selected() === i() ? "› " : "  "}
-                {pattern.padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
+                {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
               </text>
             </box>
           }</For>
@@ -560,8 +636,8 @@ function App() {
       <Show when={page() === 2}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={2}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>CALIBRATE YOUR DESK</text>
-          <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times.</text>
-          <box width={Math.min(70, dimensions().width - 8)} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
+          <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times. Esc cancels.</text>
+          <box width={Math.max(22, Math.min(70, dimensions().width - 8))} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
             <text fg={theme.text}>02  Tap surface     ·  learn impact intensity</text>
             <text fg={theme.text}>03  Save thresholds ·  tune detection</text>
@@ -571,7 +647,7 @@ function App() {
             <text fg={theme.accent}>Phase: {calPhase().toUpperCase()}  {calProgress()}%</text>
             <text fg={theme.good}>{"━".repeat(Math.round(calProgress() / 5))}<span style={{ fg: theme.border }}>{"┄".repeat(20 - Math.round(calProgress() / 5))}</span></text>
           </box>
-          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? "● Calibration in progress… tap when instructed" : "Press c to begin calibration"}</text>
+          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? (calPhase() === "tap" ? "● TAP YOUR DESK NOW — Esc to cancel" : "● Stay quiet until instructed — Esc to cancel") : "Press c to begin calibration"}</text>
         </box>
       </Show>
       <Show when={page() === 3}>
@@ -579,7 +655,13 @@ function App() {
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>SETTINGS</text>
           <text fg={theme.dim}>Stored in {CONFIG}</text>
           <box backgroundColor={theme.pane} padding={2} gap={1}>
-            <text fg={theme.text}>Microphone     {String(config().audio?.device_index ?? "system default")}</text>
+            <text fg={theme.text}>Microphone     {truncate(
+              micDevices().find((dev) => dev.index === config().audio?.device_index)?.name ||
+                (config().audio?.device_index === null || config().audio?.device_index === undefined
+                  ? "System default" : "Device " + config().audio?.device_index),
+              Math.max(12, dimensions().width - 22),
+            )}</text>
+            <text fg={theme.dim}>Press m to cycle microphone inputs ({micDevices().length} detected)</text>
             <text fg={theme.text}>Sampling rate  {String(config().audio?.sample_rate ?? 44100)} Hz</text>
             <text fg={theme.text}>Bandpass       {String(config().filter?.low ?? 50)} – {String(config().filter?.high ?? 800)} Hz</text>
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
@@ -588,7 +670,7 @@ function App() {
             <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
             <Bar level={threshold()} />
           </box>
-          <text fg={theme.dim}>Config is YAML. Changes made here are saved and the listener restarts.</text>
+          <text fg={theme.dim}>Changes save atomically; previous YAML is backed up to config.yaml.bak.</text>
         </box>
       </Show>
       <Show when={page() === 4}>
@@ -609,8 +691,10 @@ function App() {
         </box>
       </Show>
       <box paddingTop={1} border={["top"]} borderColor={theme.border} flexDirection="row" justifyContent="space-between">
-        <text fg={theme.dim}>{truncate(notice(), Math.max(20, dimensions().width - 67))}</text>
-        <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   / <span style={{ fg: theme.text }}>command</span>   ? <span style={{ fg: theme.text }}>help</span>   q <span style={{ fg: theme.text }}>quit</span></text>
+        <text fg={theme.dim}>{truncate(notice(), Math.max(8, dimensions().width - (narrow() ? 10 : 67)))}</text>
+        <Show when={!narrow()}>
+          <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   / <span style={{ fg: theme.text }}>command</span>   ? <span style={{ fg: theme.text }}>help</span>   q <span style={{ fg: theme.text }}>quit</span></text>
+        </Show>
       </box>
     </box>
   )

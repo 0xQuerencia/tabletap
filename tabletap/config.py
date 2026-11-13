@@ -1,9 +1,12 @@
 import os
 import logging
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
+from ruamel.yaml import YAML
 
 log = logging.getLogger("tabletap")
 
@@ -92,23 +95,56 @@ def init_config(dest: str | Path | None = None) -> Path:
     import shutil
     src = Path(__file__).parent / "default_config.yaml"
     shutil.copy2(src, dest)
+    dest.chmod(0o600)  # action commands belong to the current user
     return dest
 
 
 def save_calibration(cfg: dict, calibration: dict, path: Path | None = None) -> Path:
-    if path is None:
-        path = DEFAULT_PATHS[0]
-    
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    
-    cfg.setdefault("detection", {})
-    cfg["detection"]["noise_floor_db"] = calibration["noise_floor_db"]
-    cfg["detection"]["slam_peak_db"] = calibration["slam_peak_db"]
-    cfg["detection"]["threshold_db"] = calibration["threshold_db"]
-    
-    with open(path, 'w') as f:
-        yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
-    
-    return path
+    """Persist calibration without deleting action comments or risking a partial write.
 
+    The app's UI can edit the same YAML. Always reread the latest file instead
+    of dumping an old in-memory configuration over changes made by the user.
+    """
+    path = Path(path) if path is not None else DEFAULT_PATHS[0]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_editor = YAML()
+    yaml_editor.preserve_quotes = True
+    if path.exists():
+        with path.open("r", encoding="utf-8") as source:
+            document = yaml_editor.load(source)
+        if not isinstance(document, dict):
+            raise ValueError("Cannot save calibration: config YAML must be a mapping")
+    else:
+        document = dict(cfg)
+
+    detection = document.setdefault("detection", {})
+    if not isinstance(detection, dict):
+        raise ValueError("Cannot save calibration: detection must be a mapping")
+    for name in ("noise_floor_db", "slam_peak_db", "threshold_db"):
+        detection[name] = float(calibration[name])
+
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=path.parent, prefix=".config-", suffix=".tmp",
+            encoding="utf-8", delete=False,
+        ) as output:
+            temporary_path = Path(output.name)
+            yaml_editor.dump(document, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary_path, 0o600)
+        if path.exists():
+            shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+    # Existing callers can continue using their in-memory calibrated values.
+    cfg.setdefault("detection", {}).update({
+        key: float(calibration[key])
+        for key in ("noise_floor_db", "slam_peak_db", "threshold_db")
+    })
+    return path

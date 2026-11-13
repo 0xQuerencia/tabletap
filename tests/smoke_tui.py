@@ -1,6 +1,7 @@
 """Launch the real OpenTUI demo in a pseudo-terminal and quit via keyboard."""
 import fcntl
 import os
+import shlex
 import pty
 import select
 import struct
@@ -15,8 +16,9 @@ def main():
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 125, 0, 0))
     env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor")
+    command = shlex.split(os.environ.get("TABLETAP_SMOKE_COMMAND", "bun run index.tsx --demo"))
     proc = subprocess.Popen(
-        ["bun", "run", "index.tsx", "--demo"],
+        command,
         cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
         start_new_session=True,
     )
@@ -39,10 +41,30 @@ def main():
             f"OpenTUI exited unexpectedly: rc={proc.returncode}, output={output[-1000:]!r}"
         )
         assert output, "No terminal output from OpenTUI"
+        # OpenTUI renders continually. Drain the PTY during interactions so
+        # its terminal output cannot fill the buffer and block key handling.
+        def drain(duration):
+            deadline = time.monotonic() + duration
+            while time.monotonic() < deadline:
+                available, _, _ = select.select([master], [], [], 0.04)
+                if available:
+                    try:
+                        os.read(master, 65536)
+                    except OSError:
+                        break
+
+        for key in (b"2", b"j", b"?", b"?", b"5", b"1"):
+            os.write(master, key)
+            drain(0.16)
+            assert proc.poll() is None, f"OpenTUI crashed after key {key!r}"
         os.write(master, b"q")
-        proc.wait(timeout=10)
+        deadline = time.monotonic() + 10
+        while proc.poll() is None and time.monotonic() < deadline:
+            drain(0.12)
+        if proc.poll() is None:
+            raise AssertionError("OpenTUI did not quit after q; terminal output was drained")
         assert proc.returncode == 0, f"OpenTUI exited with code {proc.returncode}"
-        print("OpenTUI PTY smoke: passed (rendered and accepted q)")
+        print("OpenTUI PTY smoke: passed (rendered, navigated, help, quit)")
     finally:
         if proc.poll() is None:
             proc.terminate()

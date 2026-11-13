@@ -28,16 +28,22 @@ class MicCapture:
         self.device_index = cfg.get("device_index")
 
         self.pa = pyaudio.PyAudio()
-        self.stream = self._open_stream()
-
+        self.stream = None
         self._filter = None
         self.sos = None
-        if filter_cfg and filter_cfg.get("enabled", True):
-            low = filter_cfg.get("low", 20)
-            high = filter_cfg.get("high", 200)
-            sos = make_bandpass(low, high, self.sample_rate)
-            self._filter = StatefulBandpass(sos, channels=self.channels)
-            self.sos = sos
+        try:
+            self.stream = self._open_stream()
+            if filter_cfg and filter_cfg.get("enabled", True):
+                low = filter_cfg.get("low", 20)
+                high = filter_cfg.get("high", 200)
+                sos = make_bandpass(low, high, self.sample_rate)
+                self._filter = StatefulBandpass(sos, channels=self.channels)
+                self.sos = sos
+        except Exception:
+            # PortAudio must be terminated even if opening the input device or
+            # configuring the filter fails partway through initialization.
+            self.close()
+            raise
 
     def _open_stream(self):
         return self.pa.open(
@@ -97,9 +103,17 @@ class MicCapture:
         return raw, raw.astype(np.float64)
 
     def close(self):
-        self.stream.stop_stream()
-        self.stream.close()
-        self.pa.terminate()
+        stream, self.stream = self.stream, None
+        if stream is not None:
+            try:
+                stream.stop_stream()
+            except (OSError, IOError):
+                pass
+            finally:
+                stream.close()
+        if self.pa is not None:
+            pa, self.pa = self.pa, None
+            pa.terminate()
 
     def __enter__(self):
         return self
@@ -117,3 +131,33 @@ def rms_db(chunk: np.ndarray) -> float:
 def is_spike(chunk: np.ndarray, threshold_db: float) -> bool:
     return rms_db(chunk) > threshold_db
 
+
+
+def list_input_devices() -> list[dict]:
+    """List PortAudio microphones by their actual device indices.
+
+    Results are read-only; opening a live audio stream is not required.
+    """
+    if pyaudio is None:
+        raise RuntimeError("PyAudio is not installed")
+    pa = pyaudio.PyAudio()
+    try:
+        try:
+            default_index = int(pa.get_default_input_device_info()["index"])
+        except (OSError, IOError, KeyError):
+            default_index = None
+        devices = []
+        for index in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(index)
+            if int(info.get("maxInputChannels", 0)) <= 0:
+                continue
+            devices.append({
+                "index": index,
+                "name": str(info.get("name") or "Unknown microphone"),
+                "default": index == default_index,
+                "channels": int(info["maxInputChannels"]),
+                "sample_rate": int(info.get("defaultSampleRate", 44100)),
+            })
+        return devices
+    finally:
+        pa.terminate()
