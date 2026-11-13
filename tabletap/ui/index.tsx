@@ -85,7 +85,7 @@ function App() {
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
   const [events, setEvents] = createSignal<string[]>([])
-  const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press space to listen")
+  const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press Space for safe preview · c to calibrate")
   const [selected, setSelected] = createSignal(0)
   const [editing, setEditing] = createSignal(false)
   const [editText, setEditText] = createSignal("")
@@ -104,6 +104,8 @@ function App() {
   let listenerRequest = 0
 
   const screens = createMemo(() => PAGES)
+  const narrow = createMemo(() => dimensions().width < 85)
+  const panelWidth = createMemo(() => Math.max(20, Math.min(dimensions().width - 8, 80)))
   const rows = createMemo(() => getActionRows(config(), profile()))
   const isListening = createMemo(() => state() === "LISTENING" || state() === "PREVIEW")
   const waveText = createMemo(() => wave().map((value) => WAVE[Math.max(0, Math.min(7, value))] || "▁").join(""))
@@ -504,11 +506,13 @@ function App() {
         <text fg={theme.dim}>acoustic shortcuts  /  v0.2.0   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
-        <For each={screens()}>{(name, i) =>
-          <text fg={page() === i() ? theme.accent : theme.dim}>
-            {page() === i() ? "● " : "  "}{i() + 1} {name}
-          </text>
-        }</For>
+        <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
+          <For each={screens()}>{(name, i) =>
+            <text fg={page() === i() ? theme.accent : theme.dim}>
+              {page() === i() ? "● " : "  "}{i() + 1} {name}
+            </text>
+          }</For>
+        </Show>
       </box>
       <Show when={help()}>
         <box marginTop={1} paddingX={2} paddingY={1} border borderColor={theme.accent} backgroundColor={theme.pane}>
@@ -520,9 +524,14 @@ function App() {
       </Show>
       <Show when={page() === 0}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={1}>
-          <ascii_font text="tabletap" font="tiny" />
+          <Show when={!narrow()} fallback={<text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  T A B L E T A P</text>}>
+            <ascii_font text="tabletap" font="tiny" />
+          </Show>
           <text fg={theme.dim}>tap your desk. trigger your workflow.</text>
-          <box width={Math.min(dimensions().width - 8, 80)} marginTop={2} paddingX={2} paddingY={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} gap={1}>
+          <Show when={config().detection?.noise_floor_db === undefined}>
+            <text fg={theme.amber}>Not calibrated yet · press c and follow the two steps</text>
+          </Show>
+          <box width={panelWidth()} marginTop={2} paddingX={2} paddingY={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} gap={1}>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.text} attributes={TextAttributes.BOLD}>{state() === "LISTENING" ? "● Listening for taps…" : state() === "PREVIEW" ? "◉ Listening (preview — actions disabled)" : "○ " + state()}</text>
               <text fg={theme.dim}>{profile()} profile</text>
@@ -534,7 +543,7 @@ function App() {
             </box>
           </box>
           <box width={Math.min(dimensions().width - 8, 80)} marginTop={1} flexDirection="row" justifyContent="space-between" gap={2}>
-            <box width="55%" backgroundColor={theme.pane} paddingX={2} paddingY={1}>
+            <box width={narrow() ? "100%" : "55%"} backgroundColor={theme.pane} paddingX={2} paddingY={1}>
               <text fg={theme.accent}>ACTIVE MAPPINGS</text>
               <For each={rows().slice(0, 4)}>{([key, action]) =>
                 <text fg={theme.text}>{truncate(key.padEnd(11) + " → " + (action?.name || action?.value || "not assigned"), 37)}</text>
@@ -578,7 +587,7 @@ function App() {
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={2}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>CALIBRATE YOUR DESK</text>
           <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times. Esc cancels.</text>
-          <box width={Math.min(70, dimensions().width - 8)} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
+          <box width={Math.max(22, Math.min(70, dimensions().width - 8))} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
             <text fg={theme.text}>02  Tap surface     ·  learn impact intensity</text>
             <text fg={theme.text}>03  Save thresholds ·  tune detection</text>
@@ -605,7 +614,7 @@ function App() {
             <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
             <Bar level={threshold()} />
           </box>
-          <text fg={theme.dim}>Config is YAML. Changes made here are saved and the listener restarts.</text>
+          <text fg={theme.dim}>Changes save atomically; previous YAML is backed up to config.yaml.bak.</text>
         </box>
       </Show>
       <Show when={page() === 4}>
@@ -626,8 +635,10 @@ function App() {
         </box>
       </Show>
       <box paddingTop={1} border={["top"]} borderColor={theme.border} flexDirection="row" justifyContent="space-between">
-        <text fg={theme.dim}>{truncate(notice(), Math.max(20, dimensions().width - 67))}</text>
-        <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   / <span style={{ fg: theme.text }}>command</span>   ? <span style={{ fg: theme.text }}>help</span>   q <span style={{ fg: theme.text }}>quit</span></text>
+        <text fg={theme.dim}>{truncate(notice(), Math.max(8, dimensions().width - (narrow() ? 10 : 67)))}</text>
+        <Show when={!narrow()}>
+          <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   / <span style={{ fg: theme.text }}>command</span>   ? <span style={{ fg: theme.text }}>help</span>   q <span style={{ fg: theme.text }}>quit</span></text>
+        </Show>
       </box>
     </box>
   )
