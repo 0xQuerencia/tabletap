@@ -1,6 +1,7 @@
 """Launch the real OpenTUI demo in a pseudo-terminal and quit via keyboard."""
 import fcntl
 import os
+import shlex
 import pty
 import select
 import struct
@@ -15,8 +16,9 @@ def main():
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 36, 125, 0, 0))
     env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor")
+    command = shlex.split(os.environ.get("TABLETAP_SMOKE_COMMAND", "bun run index.tsx --demo"))
     proc = subprocess.Popen(
-        ["bun", "run", "index.tsx", "--demo"],
+        command,
         cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
         start_new_session=True,
     )
@@ -39,10 +41,16 @@ def main():
             f"OpenTUI exited unexpectedly: rc={proc.returncode}, output={output[-1000:]!r}"
         )
         assert output, "No terminal output from OpenTUI"
+        # Exercise page navigation, help overlay and return to Home before quitting.
+        # Demo stays read-only even while sending keys.
+        for key in (b"2", b"j", b"?", b"?", b"5", b"1"):
+            os.write(master, key)
+            time.sleep(0.13)
+            assert proc.poll() is None, f"OpenTUI crashed after key {key!r}"
         os.write(master, b"q")
         proc.wait(timeout=10)
         assert proc.returncode == 0, f"OpenTUI exited with code {proc.returncode}"
-        print("OpenTUI PTY smoke: passed (rendered and accepted q)")
+        print("OpenTUI PTY smoke: passed (rendered, navigated, help, quit)")
     finally:
         if proc.poll() is None:
             proc.terminate()
