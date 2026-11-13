@@ -24,6 +24,7 @@ type BridgeMessage =
   | { type: "action_result"; pattern: string; status: "launched" | "failed"; message: string }
   | { type: "error"; message: string }
   | { type: "stopped" }
+  | { type: "rejected"; reason: string }
 
 const theme = {
   bg: "#1d1c2b",
@@ -93,6 +94,7 @@ function App() {
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
   const [events, setEvents] = createSignal<string[]>([])
+  const [rejected, setRejected] = createSignal(0)
   const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press Space for safe preview · c to calibrate")
   const [selected, setSelected] = createSignal(0)
   const [editing, setEditing] = createSignal(false)
@@ -160,6 +162,9 @@ function App() {
         : m.pattern.toUpperCase() + "  command launched"
       addLog(resultText)
       setNotice(resultText)
+    } else if (m.type === "rejected") {
+      setRejected((v) => v + 1)
+      if (rejected() % 10 === 1) addLog("Ignored noise: " + m.reason)
     } else if (m.type === "error") {
       setState("ERROR")
       setNotice(m.message)
@@ -321,6 +326,10 @@ function App() {
       (devices.find((device) => device.index === next)?.name || "microphone " + next)
     saveField(["audio", "device_index"], next, "microphone: " + name)
   }
+  function toggleFourTaps() {
+    const enable = config().detection?.enable_four_taps !== true
+    saveField(["detection", "enable_four_taps"], enable, enable ? "four taps enabled" : "four taps disabled")
+  }
   function adjustThreshold(increase: number) {
     const old = Number(config().filter?.sensitivity_offset_db || 0)
     const next = Math.max(-30, Math.min(30, old + increase))
@@ -373,6 +382,7 @@ function App() {
               ))))
               if (typeof data.db === "number") setLevel(data.db)
               setNotice(phase === "noise" ? "Stay quiet while measuring room noise…" :
+                phase === "work" ? "TYPE AND CLICK NORMALLY NOW." :
                 phase === "tap" ? "TAP YOUR DESK 5–10 TIMES NOW." :
                 "Get ready to tap your desk…")
             } else if (data.type === "calibration_done") {
@@ -509,6 +519,7 @@ function App() {
       if (key.name === "+" || key.name === "=") adjustThreshold(2)
       if (key.name === "-") adjustThreshold(-2)
       if (key.name === "m") cycleMicrophone()
+      if (key.name === "f") toggleFourTaps()
     }
   })
 
@@ -553,7 +564,7 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.3.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.4.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -569,7 +580,7 @@ function App() {
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
           <text fg={theme.text}>1–5 pages  ·  tab next  ·  space start/stop  ·  p profile  ·  v preview</text>
           <text fg={theme.text}>c calibrate  ·  / commands  ·  j/k select action  ·  enter edit  ·  t action type</text>
-          <text fg={theme.text}>m microphone on Settings  ·  +/- sensitivity  ·  ? help  ·  q quit</text>
+          <text fg={theme.text}>m microphone · f toggle 4 taps · +/- sensitivity · ? help · q quit</text>
         </box>
       </Show>
       <Show when={page() === 0}>
@@ -636,18 +647,20 @@ function App() {
       <Show when={page() === 2}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={2}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>CALIBRATE YOUR DESK</text>
-          <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times. Esc cancels.</text>
+          <text fg={theme.dim}>Three phases: quiet, normal typing/mousing, then desk taps. Esc cancels.</text>
           <box width={Math.max(22, Math.min(70, dimensions().width - 8))} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
-            <text fg={theme.text}>02  Tap surface     ·  learn impact intensity</text>
-            <text fg={theme.text}>03  Save thresholds ·  tune detection</text>
+            <text fg={theme.text}>02  Work normally   ·  type and click (learn what NOT to trigger)</text>
+            <text fg={theme.text}>03  Tap surface     ·  learn deliberate desk knocks</text>
+            <text fg={theme.text}>04  Save threshold  ·  require knocks louder than typing</text>
             <text fg={theme.dim}>Saved noise floor: {config().detection?.noise_floor_db ?? "not calibrated"} dB</text>
+            <text fg={theme.dim}>Saved work peak:   {config().detection?.work_peak_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Saved tap peak:    {config().detection?.slam_peak_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Current threshold: {threshold()} dB</text>
             <text fg={theme.accent}>Phase: {calPhase().toUpperCase()}  {calProgress()}%</text>
             <text fg={theme.good}>{"━".repeat(Math.round(calProgress() / 5))}<span style={{ fg: theme.border }}>{"┄".repeat(20 - Math.round(calProgress() / 5))}</span></text>
           </box>
-          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? (calPhase() === "tap" ? "● TAP YOUR DESK NOW — Esc to cancel" : "● Stay quiet until instructed — Esc to cancel") : "Press c to begin calibration"}</text>
+          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? (calPhase() === "tap" ? "● TAP YOUR DESK NOW — Esc to cancel" : calPhase() === "work" ? "● TYPE and CLICK like normal — Esc cancels" : "● Stay quiet until instructed — Esc to cancel") : "Press c to begin calibration"}</text>
         </box>
       </Show>
       <Show when={page() === 3}>
@@ -665,6 +678,8 @@ function App() {
             <text fg={theme.text}>Sampling rate  {String(config().audio?.sample_rate ?? 44100)} Hz</text>
             <text fg={theme.text}>Bandpass       {String(config().filter?.low ?? 50)} – {String(config().filter?.high ?? 800)} Hz</text>
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
+            <text fg={theme.text}>Four taps      {config().detection?.enable_four_taps === true ? "ENABLED" : "DISABLED (safer)"} · press f to toggle</text>
+            <text fg={theme.dim}>Rejected noise candidates: {rejected()} (this session)</text>
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>
             <text fg={theme.amber}>Threshold      {threshold().toFixed(1)} dB   (+/- tunes sensitivity)</text>
             <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
