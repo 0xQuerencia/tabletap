@@ -57,7 +57,7 @@ def simulate(trace, capsys, category=None):
         "detection": {
             "threshold_db": -30.0, "noise_floor_db": -55.0,
             "slam_peak_db": -12.0, "min_gap_ms": 150,
-            "rhythm_window_ms": 800, "enable_hold_gestures": False,
+            "rhythm_window_ms": 800, "enable_four_taps": True, "enable_hold_gestures": False,
         },
         "actions": {
             "single": {"type": "exec", "value": "echo one"},
