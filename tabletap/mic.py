@@ -131,3 +131,33 @@ def rms_db(chunk: np.ndarray) -> float:
 def is_spike(chunk: np.ndarray, threshold_db: float) -> bool:
     return rms_db(chunk) > threshold_db
 
+
+
+def list_input_devices() -> list[dict]:
+    """List PortAudio microphones by their actual device indices.
+
+    Results are read-only; opening a live audio stream is not required.
+    """
+    if pyaudio is None:
+        raise RuntimeError("PyAudio is not installed")
+    pa = pyaudio.PyAudio()
+    try:
+        try:
+            default_index = int(pa.get_default_input_device_info()["index"])
+        except (OSError, IOError, KeyError):
+            default_index = None
+        devices = []
+        for index in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(index)
+            if int(info.get("maxInputChannels", 0)) <= 0:
+                continue
+            devices.append({
+                "index": index,
+                "name": str(info.get("name") or "Unknown microphone"),
+                "default": index == default_index,
+                "channels": int(info["maxInputChannels"]),
+                "sample_rate": int(info.get("defaultSampleRate", 44100)),
+            })
+        return devices
+    finally:
+        pa.terminate()
