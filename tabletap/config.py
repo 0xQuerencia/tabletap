@@ -80,6 +80,11 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     with open(p) as f:
         cfg = yaml.safe_load(f)
     
+    if not isinstance(cfg, dict):
+        raise ValueError("Configuration YAML must contain a mapping, not a list or empty file")
+    for section in ("audio", "filter", "detection", "actions"):
+        if section in cfg and not isinstance(cfg[section], dict):
+            raise ValueError(f"Configuration section {section!r} must be a mapping")
     warnings = validate_config(cfg)
     for warning in warnings:
         log.warning(f"Config validation: {warning}")

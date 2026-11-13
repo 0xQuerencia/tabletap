@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tabletap"
-version = "0.3.0"
+version = "0.3.1"
 description = "Turn your laptop table into a button pad using the built-in microphone"
 requires-python = ">=3.10"
 dependencies = [

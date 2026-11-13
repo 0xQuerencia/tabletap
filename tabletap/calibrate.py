@@ -10,7 +10,9 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
     audio_cfg = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     cal_cfg = cfg.get("calibration", {})
-    duration = duration_sec or cal_cfg.get("duration_sec", 5)
+    duration = duration_sec if duration_sec is not None else cal_cfg.get("duration_sec", 5)
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        raise ValueError("Calibration duration must be greater than zero seconds")
 
     print("[tabletap] Phase 1: Listening to ambient noise...")
     print("[tabletap] Stay quiet for 5 seconds.")
@@ -36,6 +38,8 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
 
     print()
 
+    if not noise_samples:
+        raise ValueError("No audio samples received during noise calibration")
     noise_floor = float(np.percentile(noise_samples, 10))
 
     print(f"\n[tabletap] Phase 2: Tap/slam the table for {duration} seconds!")
@@ -70,6 +74,8 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
     # every chunk often represents quiet room audio, not taps.
     # P98 samples the high-energy impacts without relying on one
     # potentially clipped microphone frame.
+    if not slam_samples:
+        raise ValueError("No audio samples received during tap calibration")
     slam_peak = float(np.percentile(slam_samples, 98))
 
     gap = slam_peak - noise_floor

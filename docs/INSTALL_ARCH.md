@@ -117,3 +117,32 @@ default interaction.
   works in the same shell.
 - **Another TableTap process is listening:** stop the existing
   `tabletap start` service/session before launching the interactive TUI.
+
+
+## 6. Optional always-on systemd user service
+
+The default TUI starts **stopped and safe**, and lets you inspect taps
+before arming commands. Background service mode is different: it can execute
+configured commands whenever a pattern is detected. Enable it only after
+you have tested the mic and verified your mappings.
+
+```console
+.venv/bin/tabletap service install
+systemctl --user daemon-reload
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+systemctl --user enable --now tabletap.service
+```
+
+The generated unit uses the Python interpreter that ran `tabletap`, so
+it does not require a stale `~/.local/bin/tabletap` launcher, a hardcoded
+display name, or system-wide `pip` installation.
+
+Stop it before opening the interactive app:
+`systemctl --user stop tabletap.service`.
+
+To uninstall:
+```console
+systemctl --user disable --now tabletap.service
+.venv/bin/tabletap service uninstall
+systemctl --user daemon-reload
+```

@@ -553,7 +553,7 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.3.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.3.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
