@@ -40,7 +40,7 @@ def emit(kind: str, **fields) -> None:
         sys.stdout.flush()
 
 
-def run_bridge(config_path=None, category=None, dry_run=False) -> int:
+def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None) -> int:
     """Listen continuously, report live levels/gestures, and execute mapped actions.
 
     A lock prevents a TUI bridge from racing the old systemd daemon.
@@ -52,6 +52,10 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
     except (OSError, ValueError, yaml.YAMLError) as exc:
         emit("error", message=f"Cannot load TableTap config: {exc}")
         return 2
+    if live_seconds is not None:
+        if dry_run or not 0 < live_seconds <= 600:
+            emit("error", message="A live authorization must be between 0 and 600 seconds, and cannot be used with --dry-run")
+            return 2
     audio = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     detection = cfg.get("detection", {})
@@ -129,7 +133,13 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
                 dry_run=dry_run, threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
             )
             last_level_at = 0.0
+            deadline = time.monotonic() + live_seconds if live_seconds is not None else None
             while running:
+                # Enforced inside the Python action-capable process, even if
+                # the terminal UI freezes or its timer never gets CPU time.
+                if deadline is not None and time.monotonic() >= deadline:
+                    emit("live_expired", message="Live action authorization expired")
+                    break
                 _raw, filtered = mic.read_filtered()
                 db = float(rms_db(filtered))
                 now = time.monotonic()

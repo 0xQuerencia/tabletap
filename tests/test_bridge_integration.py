@@ -109,3 +109,46 @@ def test_four_taps_reach_fourth_media_mapping(capsys):
 def test_background_noise_does_not_dispatch(capsys):
     data = simulate([(i * 0.08, -65.0) for i in range(20)], capsys)
     assert not [v for v in data if v["type"] == "gesture"]
+
+
+def test_python_live_deadline_is_enforced_even_without_tui(capsys):
+    """A frozen UI cannot leave its Python action bridge armed forever."""
+    import numpy as np
+    from tabletap.bridge import run_bridge
+
+    clock = {"now": 0.0}
+
+    class SteadyMic:
+        def __init__(self, *_a):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *_a):
+            return False
+        def read_filtered(self):
+            clock["now"] += 0.025
+            samples = np.zeros(1024, dtype=np.int16)
+            return samples, samples
+
+    config = {"audio": {}, "filter": {}, "detection": {}, "actions": {}}
+    with patch("tabletap.bridge.load_config", return_value=config), \
+         patch("tabletap.bridge.MicCapture", SteadyMic), \
+         patch("tabletap.bridge.PIDLock") as lock, \
+         patch("tabletap.bridge.rms_db", return_value=-70.0), \
+         patch("tabletap.bridge.time.monotonic", side_effect=lambda: clock["now"]):
+        lock.return_value.acquire.return_value = True
+        status = run_bridge(config_path="/fake", dry_run=False, live_seconds=0.05)
+    assert status == 0
+    emitted = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [item["type"] for item in emitted][-2:] == ["live_expired", "stopped"]
+    assert not any(item["type"] == "gesture" for item in emitted)
+
+
+def test_invalid_live_expiry_cannot_arm_bridge(capsys):
+    from tabletap.bridge import run_bridge
+    config = {"audio": {}, "filter": {}, "detection": {}, "actions": {}}
+    with patch("tabletap.bridge.load_config", return_value=config):
+        assert run_bridge(config_path="/fake", live_seconds=601) == 2
+        assert run_bridge(config_path="/fake", live_seconds=10, dry_run=True) == 2
+    emitted = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert all(item["type"] == "error" for item in emitted)

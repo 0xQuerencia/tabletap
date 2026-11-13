@@ -191,6 +191,7 @@ def main():
     bridge_p.add_argument("-c", "--config", help="Path to config.yaml")
     bridge_p.add_argument("--category", help="Action category")
     bridge_p.add_argument("--dry-run", action="store_true", help="Detect but do not execute")
+    bridge_p.add_argument("--max-live-seconds", type=float, help=argparse.SUPPRESS)
     bridge_p.add_argument("--calibrate", action="store_true", help="Stream calibration progress")
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
@@ -355,6 +356,7 @@ def main():
             config_path=args.config,
             category=args.category,
             dry_run=args.dry_run,
+            live_seconds=args.max_live_seconds,
         ))
 
     try:

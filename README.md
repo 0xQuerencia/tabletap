@@ -393,3 +393,7 @@ switch to preview, and `/panic` to stop microphone listening.
 `tabletap start` or the optional always-on systemd user service
 runs commands without TUI arming; don't enable that service until your
 work-noise audit is clean.
+
+The 10-minute limit is enforced twice: by the TUI countdown **and**
+independently inside the Python action-capable audio bridge. A frozen terminal
+UI therefore cannot silently keep the bridge armed beyond its authorization.

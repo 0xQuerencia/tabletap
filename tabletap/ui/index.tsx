@@ -26,6 +26,7 @@ type BridgeMessage =
   | { type: "error"; message: string }
   | { type: "stopped" }
   | { type: "rejected"; reason: string }
+  | { type: "live_expired"; message: string }
 
 const theme = {
   bg: "#1d1c2b",
@@ -243,6 +244,11 @@ function App() {
         : m.pattern.toUpperCase() + "  command launched"
       addLog(resultText)
       setNotice(resultText)
+    } else if (m.type === "live_expired") {
+      setSafety(SAFE_ARM, false)
+      addLog("Python bridge expired live authorization; switching to preview")
+      setNotice("LIVE ACTIONS EXPIRED · restarting safe preview")
+      void startBridge(true)
     } else if (m.type === "rejected") {
       setRejected((v) => v + 1)
       if (rejected() % 10 === 1) addLog("Ignored noise: " + m.reason)
@@ -298,7 +304,14 @@ function App() {
     setNotice("Opening microphone…")
     const args = [PYTHON, "-u", "-m", "tabletap", "bridge"]
     if (profile() !== "default") args.push("--category", profile())
-    if (preview()) args.push("--dry-run")
+    if (preview()) {
+      args.push("--dry-run")
+    } else {
+      // Independent defense in the Python process: it stops executing when
+      // this period elapses even if the UI freezes or is no longer responsive.
+      const remainingSec = Math.max(0.001, (armState().expiresAt - Date.now()) / 1000)
+      args.push("--max-live-seconds", String(remainingSec))
+    }
     try {
       const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe", stdin: "ignore" })
       bridge = proc
