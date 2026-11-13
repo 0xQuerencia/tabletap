@@ -172,6 +172,11 @@ def main():
     test_p.add_argument("-c", "--config", help="Path to config.yaml")
     test_p.add_argument("-d", "--duration", type=int, default=30, help="Test duration in seconds (default: 30)")
 
+    audit_p = sub.add_parser("audit", help="Measure false tap detections while working (always dry-run, offline)")
+    audit_p.add_argument("-d", "--duration", type=int, default=30, help="Observe normal work for 5–600 seconds (default: 30)")
+    audit_p.add_argument("-c", "--config", help="Path to config.yaml")
+    audit_p.add_argument("--json", action="store_true", help="One JSON result, for local scripts and bug reports")
+
     init_p = sub.add_parser("init", help="Create default config at ~/.config/tabletap/config.yaml")
     init_p.add_argument("--path", help="Custom destination path")
 
@@ -200,6 +205,21 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "audit":
+        from .audit import observe_work, format_audit
+        import json
+        if not 5 <= args.duration <= 600:
+            parser.error("audit duration must be between 5 and 600 seconds")
+        if not args.json:
+            print("[tabletap] Work normally: type and click, but DO NOT intentionally tap the desk.")
+            print("[tabletap] Every reported tap is a potential false positive. Actions stay disabled.\n")
+        result = observe_work(args.duration, args.config)
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            print(format_audit(result))
+        sys.exit(2 if result["status"] == "error" else 1 if result["status"] == "warn" else 0)
 
     if args.command == "service":
         from .service import install_user_service, remove_user_service, user_service_path

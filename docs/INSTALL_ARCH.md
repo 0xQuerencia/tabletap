@@ -165,3 +165,15 @@ If intentional desk taps fail during calibration, your keyboard/mouse and
 desk tapping are too close in loudness for the current mic placement.
 Use a harder tap surface or a closer microphone. Do not arm actions with
 `v` until the safe preview stops falsely detecting ordinary work.
+
+## Validate false positives while working (offline)
+
+The new `tabletap audit -d 60` command runs the same local microphone
+detector as the TUI, **with all action execution disabled**. Spend one minute
+typing and using your mouse *without tapping deliberately*; it reports
+unintended gestures and rejected sounds, plus threshold headroom.
+Stop the interactive listener or background service first, since the PID
+lock allows only one listener. If it fails, try `tabletap doctor`.
+No microphone recordings, keyboard data, or network connections are made.
+
+For a structured result: `.venv/bin/tabletap audit -d 60 --json`.

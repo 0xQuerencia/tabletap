@@ -345,3 +345,34 @@ when the source sounds are physically indistinguishable.
 **Your existing configuration is preserved**; new calibration fields are
 added without deleting comments, and the previous file is saved to
 `~/.config/tabletap/config.yaml.bak`.
+
+## Work-noise audit: prove that normal typing stays quiet
+
+Before arming any shortcuts, you can test false positives **without ever
+executing an action**:
+
+```console
+.venv/bin/tabletap audit --duration 60
+```
+
+**Type and click normally** for the whole interval; do not deliberately tap
+the desk. TableTap runs the same acoustic bridge as the TUI but forces
+`--dry-run`, counts unintended single/double/triple/four patterns, lists
+rejected noise, and reports the microphone's maximum level and threshold
+headroom. It records **no audio and no keys**, writes no files, and requires
+no network or Bun runtime. An already-running listener must be stopped
+first; the existing PID lock prevents racing listeners.
+
+A passing 60-second audit is useful evidence but not proof of zero false
+positives. If it reports gestures, recalibrate (`c` in the TUI; type normally
+during the middle phase), adjust the threshold, or move the mic and repeat
+the audit before enabling real shortcuts.
+
+Local, machine-readable results for your own debugging:
+
+```console
+.venv/bin/tabletap audit -d 60 --json
+```
+
+Exit codes: `0` = no detected false patterns, `1` = one or more unintended
+patterns, `2` = cannot complete the audit (microphone or config error).
