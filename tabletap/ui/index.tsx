@@ -1,23 +1,19 @@
 import { createSignal, createMemo, For, Show, onCleanup, onMount } from "solid-js"
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { TextAttributes, type InputRenderable } from "@opentui/core"
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
-import YAML from "yaml"
-
-type Action = { name?: string; type?: "key" | "exec" | "script"; value?: string }
-type TableConfig = {
-  actions: Record<string, Record<string, Action>>
-  detection?: Record<string, number>
-  filter?: Record<string, number | boolean>
-  audio?: Record<string, unknown>
-}
+import {
+  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
+  type Action, type TableConfig,
+} from "./config-store"
 
 type BridgeMessage =
   | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
   | { type: "level"; db: number; threshold_db: number; spike: boolean }
   | { type: "gesture"; pattern: string; action: string; dispatched: boolean }
+  | { type: "action_result"; pattern: string; status: "launched" | "failed"; message: string }
   | { type: "error"; message: string }
   | { type: "stopped" }
 
@@ -34,7 +30,6 @@ const theme = {
   pink: "#f2a7c3",
 }
 const PAGES = ["Home", "Actions", "Calibrate", "Settings", "Activity"] as const
-const DEFAULT_PATTERNS = ["single", "double", "triple", "quadruple", "long", "medium", "extended", "repeat"]
 const PYTHON = process.env.TABLETAP_PYTHON || "python3"
 const CONFIG = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "tabletap", "config.yaml")
 const PREFS = join(dirname(CONFIG), "tui.json")
@@ -43,15 +38,10 @@ const WAVE = "▁▂▃▄▅▆▇█"
 
 function readConfig(): TableConfig {
   try {
-    return YAML.parse(readFileSync(CONFIG, "utf8")) as TableConfig
+    return readTableConfig(CONFIG)
   } catch {
     return { actions: {} }
   }
-}
-function saveConfig(config: TableConfig) {
-  if (IS_DEMO) return // A preview must never overwrite actual user mappings.
-  mkdirSync(dirname(CONFIG), { recursive: true })
-  writeFileSync(CONFIG, YAML.stringify(config), { mode: 0o600 })
 }
 function loadProfile() {
   try {
@@ -65,22 +55,6 @@ function saveProfile(profile: string) {
   if (IS_DEMO) return
   mkdirSync(dirname(PREFS), { recursive: true })
   writeFileSync(PREFS, JSON.stringify({ profile }) + "\n", { mode: 0o600 })
-}
-function profilesOf(config: TableConfig): string[] {
-  const categories = Object.entries(config.actions || {})
-    .filter((entry) => Object.keys(entry[1] || {}).some((key) => /^\d+$/.test(key)))
-    .map((entry) => entry[0])
-  return ["default", ...categories]
-}
-function actionsOf(config: TableConfig, profile: string): [string, Action][] {
-  const actions = config.actions || {}
-  if (profile === "default") {
-    return DEFAULT_PATTERNS.map((key) => [key, actions[key] as unknown as Action])
-      .filter((entry) => Boolean(entry[1])) as [string, Action][]
-  }
-  return Object.entries(actions[profile] || {})
-    .filter((entry) => /^\d+$/.test(entry[0]))
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
 }
 function truncate(text: string, width: number): string {
   if (text.length <= width) return text
@@ -106,7 +80,7 @@ function App() {
   const [config, setConfig] = createSignal<TableConfig>(readConfig())
   const [profile, setProfile] = createSignal(loadProfile())
   const [state, setState] = createSignal(IS_DEMO ? "DEMO" : "STOPPED")
-  const [preview, setPreview] = createSignal(IS_DEMO)
+  const [preview, setPreview] = createSignal(true)
   const [level, setLevel] = createSignal(-80)
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
@@ -126,9 +100,10 @@ function App() {
   let bridge: ReturnType<typeof Bun.spawn> | null = null
   let calibration: ReturnType<typeof Bun.spawn> | null = null
   let demoTimer: ReturnType<typeof setInterval> | null = null
+  let calibrationCancelled = false
 
   const screens = createMemo(() => PAGES)
-  const rows = createMemo(() => actionsOf(config(), profile()))
+  const rows = createMemo(() => getActionRows(config(), profile()))
   const isListening = createMemo(() => state() === "LISTENING" || state() === "PREVIEW")
   const waveText = createMemo(() => wave().map((value) => WAVE[Math.max(0, Math.min(7, value))] || "▁").join(""))
 
@@ -162,6 +137,12 @@ function App() {
     } else if (m.type === "gesture") {
       addLog(m.pattern.toUpperCase() + "  →  " + m.action + (m.dispatched ? "" : " (preview)"))
       setNotice(m.pattern + " tap → " + m.action)
+    } else if (m.type === "action_result") {
+      const resultText = m.status === "failed"
+        ? m.pattern.toUpperCase() + "  FAILED: " + m.message
+        : m.pattern.toUpperCase() + "  command launched"
+      addLog(resultText)
+      setNotice(resultText)
     } else if (m.type === "error") {
       setState("ERROR")
       setNotice(m.message)
@@ -233,7 +214,7 @@ function App() {
     else await startBridge()
   }
   async function selectProfile() {
-    const options = profilesOf(config())
+    const options = getProfiles(config())
     const next = options[(options.indexOf(profile()) + 1) % options.length] || "default"
     setProfile(next)
     setSelected(0)
@@ -381,7 +362,7 @@ function App() {
       setPreview((v) => !v)
       if (isListening()) void startBridge()
     } else if (cmd === "profile") {
-      const options = profilesOf(config())
+      const options = getProfiles(config())
       if (arg && options.includes(arg)) {
         setProfile(arg)
         saveProfile(arg)
@@ -454,7 +435,7 @@ function App() {
   onMount(() => {
     const current = readConfig()
     setConfig(current)
-    if (!profilesOf(current).includes(profile())) setProfile("default")
+    if (!getProfiles(current).includes(profile())) setProfile("default")
     if (IS_DEMO) {
       setState("DEMO")
       let count = 0
