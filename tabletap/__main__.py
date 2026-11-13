@@ -177,6 +177,8 @@ def main():
     sub.add_parser("status", help="Show current config and device info")
     sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
     sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
+    devices_p = sub.add_parser("devices", help="List available microphone input devices")
+    devices_p.add_argument("--json", action="store_true", help="Machine-readable microphone list")
     bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
     bridge_p.add_argument("-c", "--config", help="Path to config.yaml")
     bridge_p.add_argument("--category", help="Action category")
@@ -195,6 +197,30 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "devices":
+        from .mic import list_input_devices
+        import json
+        try:
+            devices = list_input_devices()
+        except (OSError, IOError, RuntimeError) as exc:
+            if args.json:
+                print(json.dumps({"devices": [], "error": str(exc)}))
+            else:
+                print("[tabletap] Unable to list microphones: " + str(exc), file=sys.stderr)
+            sys.exit(1)
+        if args.json:
+            print(json.dumps({"devices": devices}))
+        else:
+            print("TableTap microphone inputs:")
+            if not devices:
+                print("  No capture devices found. Run tabletap doctor.")
+            for device in devices:
+                marker = " (system default)" if device["default"] else ""
+                print(f"  [{device['index']}] {device['name']}{marker}")
+            print("Change the selected microphone in TUI Settings (press m), or edit")
+            print("  ~/.config/tabletap/config.yaml: audio.device_index")
+        return
 
     if args.command in ("setup", "doctor"):
         from .config import init_config
