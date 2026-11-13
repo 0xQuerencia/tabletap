@@ -95,6 +95,7 @@ def init_config(dest: str | Path | None = None) -> Path:
     import shutil
     src = Path(__file__).parent / "default_config.yaml"
     shutil.copy2(src, dest)
+    dest.chmod(0o600)  # action commands belong to the current user
     return dest
 
 
