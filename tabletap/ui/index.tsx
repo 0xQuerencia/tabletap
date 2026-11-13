@@ -101,6 +101,7 @@ function App() {
   let calibration: ReturnType<typeof Bun.spawn> | null = null
   let demoTimer: ReturnType<typeof setInterval> | null = null
   let calibrationCancelled = false
+  let listenerRequest = 0
 
   const screens = createMemo(() => PAGES)
   const rows = createMemo(() => getActionRows(config(), profile()))
@@ -110,18 +111,23 @@ function App() {
   function addLog(entry: string) {
     setEvents((items) => [timeNow() + "  " + entry, ...items].slice(0, 70))
   }
-  async function stopBridge() {
+  async function stopBridge(cancelPending = true) {
+    if (cancelPending) listenerRequest++
     const old = bridge
     bridge = null
     if (old) {
       try {
         old.kill("SIGTERM")
-        await Promise.race([old.exited, new Promise((resolve) => setTimeout(resolve, 1000))])
+        const finished = await Promise.race([
+          old.exited.then(() => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200)),
+        ])
+        if (!finished) old.kill("SIGKILL")
       } catch {
         // Process already terminated.
       }
     }
-    if (!IS_DEMO) setState("STOPPED")
+    if (!IS_DEMO && !bridge) setState("STOPPED")
   }
   function onMessage(m: BridgeMessage) {
     if (m.type === "ready") {
@@ -176,7 +182,16 @@ function App() {
   }
   async function startBridge() {
     if (IS_DEMO || calibrating()) return
-    await stopBridge()
+    const ticket = ++listenerRequest
+    await stopBridge(false)
+    if (ticket !== listenerRequest) return
+    try {
+      readTableConfig(CONFIG)
+    } catch (error) {
+      setState("ERROR")
+      setNotice("Invalid configuration: " + String(error))
+      return
+    }
     setState("STARTING")
     setNotice("Opening microphone…")
     const args = [PYTHON, "-u", "-m", "tabletap", "bridge"]
@@ -358,6 +373,7 @@ function App() {
     else if (cmd === "calibrate") void calibrate()
     else if (cmd === "preview") {
       setPreview((v) => !v)
+      setNotice(preview() ? "Preview only · commands disabled" : "LIVE ACTIONS ARMED")
       if (isListening()) void startBridge()
     } else if (cmd === "profile") {
       const options = getProfiles(config())
@@ -365,7 +381,8 @@ function App() {
         setProfile(arg)
         saveProfile(arg)
         if (isListening()) void startBridge()
-      } else void selectProfile()
+      } else if (arg) setNotice("Unknown profile: " + arg + " · valid: " + options.join(", "))
+      else void selectProfile()
     } else if (cmd === "help") setHelp(true)
     else if (cmd === "quit" || cmd === "exit") shutdown()
     else setNotice("Unknown command. Try /help.")
@@ -423,7 +440,9 @@ function App() {
     else if (key.name === "space") void toggleListener()
     else if (key.name === "p") void selectProfile()
     else if (key.name === "v") {
-      setPreview((v) => !v)
+      const next = !preview()
+      setPreview(next)
+      setNotice(next ? "Safe preview enabled · commands will NOT execute" : "LIVE ACTIONS ARMED · configured commands can run")
       if (isListening()) void startBridge()
     } else if (key.name === "c") void calibrate()
     else if (key.name === "?") setHelp((v) => !v)
@@ -443,7 +462,14 @@ function App() {
   })
 
   onMount(() => {
-    const current = readConfig()
+    let current: TableConfig
+    try {
+      current = readTableConfig(CONFIG)
+    } catch (error) {
+      setState("ERROR")
+      setNotice("Cannot load config: " + String(error))
+      return
+    }
     setConfig(current)
     if (!getProfiles(current).includes(profile())) setProfile("default")
     if (IS_DEMO) {
@@ -462,7 +488,7 @@ function App() {
     } else {
       // Listening can execute local scripts. Require an explicit Space press.
       setState("STOPPED")
-      setNotice("Press space to listen · press v first for safe preview")
+      setNotice("Press Space to listen safely (preview only) · press v to arm live actions")
     }
   })
   onCleanup(() => {
