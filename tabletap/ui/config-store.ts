@@ -74,7 +74,7 @@ export function actionFieldPath(profile: string, key: string, field: string): Co
  * Re-reads from disk to preserve edits performed by other tools since startup.
  */
 export function updateConfigField(
-  path: string, fields: ConfigField[], value: string | number | boolean, demo = false,
+  path: string, fields: ConfigField[], value: string | number | boolean | null, demo = false,
 ): TableConfig {
   if (demo) throw new Error("Demo mode is read-only")
   if (!existsSync(path)) throw new Error("Configuration not found: " + path)
