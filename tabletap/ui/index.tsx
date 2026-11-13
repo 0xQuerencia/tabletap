@@ -793,6 +793,7 @@ function App() {
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
             <text fg={theme.text}>Four taps      {config().detection?.enable_four_taps === true ? "ENABLED" : "DISABLED (safer)"} · press f to toggle</text>
             <text fg={theme.dim}>Rejected noise candidates: {rejected()} (this session)</text>
+            <text fg={theme.dim}>Work-noise QA: stop listening, then run tabletap audit -d 60</text>
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>
             <text fg={theme.amber}>Threshold      {threshold().toFixed(1)} dB   (+/- tunes sensitivity)</text>
             <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
