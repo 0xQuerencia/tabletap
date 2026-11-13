@@ -8,6 +8,7 @@ import {
   actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
   type Action, type TableConfig,
 } from "./config-store.ts"
+import { SAFE_ARM, requestArm, confirmArm, expireArm, type ArmState } from "./safety.ts"
 
 type MicDevice = {
   index: number
@@ -89,7 +90,8 @@ function App() {
   const [config, setConfig] = createSignal<TableConfig>(readConfig())
   const [profile, setProfile] = createSignal(loadProfile())
   const [state, setState] = createSignal(IS_DEMO ? "DEMO" : "STOPPED")
-  const [preview, setPreview] = createSignal(true)
+  const [armState, setArmState] = createSignal<ArmState>(SAFE_ARM)
+  const preview = createMemo(() => armState().mode !== "live")
   const [level, setLevel] = createSignal(-80)
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
@@ -111,6 +113,7 @@ function App() {
   let bridge: ReturnType<typeof Bun.spawn> | null = null
   let calibration: ReturnType<typeof Bun.spawn> | null = null
   let demoTimer: ReturnType<typeof setInterval> | null = null
+  let armTimer: ReturnType<typeof setTimeout> | null = null
   let calibrationCancelled = false
   let listenerRequest = 0
 
@@ -124,18 +127,90 @@ function App() {
   function addLog(entry: string) {
     setEvents((items) => [timeNow() + "  " + entry, ...items].slice(0, 70))
   }
-  async function stopBridge(cancelPending = true) {
+  function clearArmTimer() {
+    if (armTimer) clearTimeout(armTimer)
+    armTimer = null
+  }
+  function setSafety(next: ArmState, restart = true) {
+    const before = armState()
+    clearArmTimer()
+    setArmState(next)
+    if (next.mode !== "safe") {
+      const expected = next
+      armTimer = setTimeout(() => {
+        if (armState().mode !== expected.mode || armState().expiresAt !== expected.expiresAt) return
+        const expired = expireArm(expected, Date.now())
+        if (expired.mode !== "safe") return
+        setSafety(SAFE_ARM, false)
+        if (expected.mode === "live") {
+          addLog("Safety timeout: live actions automatically disabled")
+          setNotice("LIVE WINDOW EXPIRED · returning to safe preview")
+          if (isListening()) void startBridge(true)
+        } else {
+          setNotice("Live authorization request timed out · still in safe preview")
+        }
+      }, Math.max(0, next.expiresAt - Date.now()) + 20)
+    }
+    if (restart && isListening() && (before.mode === "live") !== (next.mode === "live")) {
+      // Leaving LIVE should terminate the action-capable bridge immediately.
+      void startBridge(before.mode === "live")
+    }
+  }
+  function disarm(reason: string, restart = true) {
+    const wasAuthorized = armState().mode !== "safe"
+    setSafety(SAFE_ARM, restart)
+    if (wasAuthorized) {
+      setNotice(reason)
+      addLog(reason)
+    }
+  }
+  function requestLive() {
+    if (IS_DEMO) {
+      setNotice("Demo mode never executes actions")
+      return
+    }
+    if (!isListening()) {
+      setNotice("Start safe microphone preview with Space before arming")
+      return
+    }
+    const next = requestArm(armState(), Date.now())
+    setSafety(next)
+    setNotice(next.mode === "confirm"
+      ? "LIVE ACTIONS: press Y within 4 seconds to confirm (auto-disarms after 10 minutes)"
+      : "Live authorization cancelled · safe preview")
+  }
+  function confirmLive() {
+    if (IS_DEMO || !isListening()) return
+    const next = confirmArm(armState(), Date.now())
+    if (next.mode !== "live") {
+      setSafety(SAFE_ARM)
+      setNotice("No valid authorization pending · press V then Y")
+      return
+    }
+    setSafety(next)
+    setNotice("LIVE ACTIONS ARMED for up to 10 minutes · press X or Esc for panic stop")
+    addLog("Explicitly armed live actions for 10 minutes")
+  }
+  async function panicStop() {
+    disarm("PANIC STOP · microphone stopped, actions disarmed", false)
+    await stopBridge(true, true)
+    setNotice("PANIC STOP · microphone stopped, actions disarmed")
+    addLog("PANIC STOP invoked")
+  }
+  async function stopBridge(cancelPending = true, immediate = false) {
     if (cancelPending) listenerRequest++
     const old = bridge
     bridge = null
     if (old) {
       try {
-        old.kill("SIGTERM")
-        const finished = await Promise.race([
-          old.exited.then(() => true),
-          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200)),
-        ])
-        if (!finished) old.kill("SIGKILL")
+        old.kill(immediate ? "SIGKILL" : "SIGTERM")
+        if (!immediate) {
+          const finished = await Promise.race([
+            old.exited.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1200)),
+          ])
+          if (!finished) old.kill("SIGKILL")
+        }
       } catch {
         // Process already terminated.
       }
@@ -144,6 +219,12 @@ function App() {
   }
   function onMessage(m: BridgeMessage) {
     if (m.type === "ready") {
+      if (!m.dry_run && preview()) {
+        void panicStop()
+        setState("ERROR")
+        setNotice("Safety mismatch: live bridge started without authorization; it was killed")
+        return
+      }
       setState(m.dry_run ? "PREVIEW" : "LISTENING")
       setThreshold(m.threshold_db)
       setNotice("Microphone active · profile: " + (m.category || "default"))
@@ -166,6 +247,7 @@ function App() {
       setRejected((v) => v + 1)
       if (rejected() % 10 === 1) addLog("Ignored noise: " + m.reason)
     } else if (m.type === "error") {
+      setSafety(SAFE_ARM, false)
       setState("ERROR")
       setNotice(m.message)
       addLog("ERROR: " + m.message)
@@ -196,11 +278,15 @@ function App() {
       if (bridge === proc) setNotice("Bridge reader failed: " + String(error))
     }
   }
-  async function startBridge() {
+  async function startBridge(forceStop = false) {
     if (IS_DEMO || calibrating()) return
     const ticket = ++listenerRequest
-    await stopBridge(false)
+    await stopBridge(false, forceStop)
     if (ticket !== listenerRequest) return
+    if (expireArm(armState(), Date.now()).mode === "safe" && armState().mode !== "safe") {
+      setSafety(SAFE_ARM, false)
+      addLog("Action authorization expired while restarting; preview mode restored")
+    }
     try {
       readTableConfig(CONFIG)
     } catch (error) {
@@ -220,6 +306,7 @@ function App() {
       void proc.exited.then((code) => {
         if (bridge !== proc) return
         bridge = null
+        setSafety(SAFE_ARM, false)
         if (state() !== "ERROR") {
           setState("STOPPED")
           setNotice("Listener exited (" + code + "). Press space to retry.")
@@ -241,12 +328,18 @@ function App() {
       setNotice("Demo mode: live microphone is intentionally disabled")
       return
     }
-    if (isListening() || state() === "STARTING") await stopBridge()
-    else await startBridge()
+    if (isListening() || state() === "STARTING") {
+      disarm("Listener stopped · live actions disabled", false)
+      await stopBridge()
+    } else {
+      setSafety(SAFE_ARM, false)
+      await startBridge()
+    }
   }
   async function selectProfile() {
     const options = getProfiles(config())
     const next = options[(options.indexOf(profile()) + 1) % options.length] || "default"
+    disarm("Profile switched · live actions disabled", false)
     setProfile(next)
     setSelected(0)
     saveProfile(next)
@@ -256,6 +349,7 @@ function App() {
   function saveField(path: (string | number)[], value: string | number | boolean | null, label: string) {
     try {
       const updated = updateConfigField(CONFIG, path, value, IS_DEMO)
+      disarm("Configuration changed · live actions disabled", false)
       setConfig(updated)
       setNotice("Saved " + label + " · original backed up as config.yaml.bak")
       addLog("Updated " + label)
@@ -341,6 +435,7 @@ function App() {
       return
     }
     if (calibrating()) return
+    disarm("Calibration started · live actions disabled", false)
     await stopBridge()
     setCalibrating(true)
     calibrationCancelled = false
@@ -420,20 +515,25 @@ function App() {
     const [cmd, arg] = value.trim().replace(/^\//, "").split(/\s+/, 2)
     setCommandOpen(false)
     setCommandText("")
-    if (cmd === "start") void startBridge()
-    else if (cmd === "stop") void stopBridge()
+    if (cmd === "start") {
+      if (!isListening()) { setSafety(SAFE_ARM, false); void startBridge() }
+      else setNotice("Listener already running")
+    }
+    else if (cmd === "stop") {
+      disarm("Listener stopped · live actions disabled", false)
+      void stopBridge()
+    }
     else if (cmd === "calibrate") void calibrate()
-    else if (cmd === "preview") {
-      if (IS_DEMO) {
-        setNotice("Demo mode is always read-only and never executes actions")
-      } else {
-        setPreview((v) => !v)
-        setNotice(preview() ? "Preview only · commands disabled" : "LIVE ACTIONS ARMED")
-        if (isListening()) void startBridge()
-      }
-    } else if (cmd === "profile") {
+    else if (cmd === "preview" || cmd === "safe") {
+      disarm("Safe preview enabled · commands disabled")
+    }
+    else if (cmd === "arm") requestLive()
+    else if (cmd === "confirm") confirmLive()
+    else if (cmd === "panic") void panicStop()
+    else if (cmd === "profile") {
       const options = getProfiles(config())
       if (arg && options.includes(arg)) {
+        disarm("Profile switched · live actions disabled", false)
         setProfile(arg)
         saveProfile(arg)
         if (isListening()) void startBridge()
@@ -444,6 +544,7 @@ function App() {
     else setNotice("Unknown command. Try /help.")
   }
   function shutdown() {
+    setSafety(SAFE_ARM, false)
     if (demoTimer) clearInterval(demoTimer)
     if (calibration) calibration.kill()
     void stopBridge()
@@ -488,6 +589,11 @@ function App() {
       shutdown()
       return
     }
+    if (key.name === "x" || key.name === "escape") {
+      key.preventDefault()
+      void panicStop()
+      return
+    }
     if (key.name === "q") shutdown()
     else if (key.name === "tab" || key.name === "right") setPage((v) => (v + 1) % PAGES.length)
     else if (key.name === "left") setPage((v) => (v + PAGES.length - 1) % PAGES.length)
@@ -495,16 +601,9 @@ function App() {
       setPage(Number(key.name) - 1)
     else if (key.name === "space") void toggleListener()
     else if (key.name === "p") void selectProfile()
-    else if (key.name === "v") {
-      if (IS_DEMO) {
-        setNotice("Demo mode is always read-only and cannot arm live actions")
-      } else {
-        const next = !preview()
-        setPreview(next)
-        setNotice(next ? "Safe preview enabled · commands will NOT execute" : "LIVE ACTIONS ARMED · configured commands can run")
-        if (isListening()) void startBridge()
-      }
-    } else if (key.name === "c") void calibrate()
+    else if (key.name === "v") requestLive()
+    else if (key.name === "y") confirmLive()
+    else if (key.name === "c") void calibrate()
     else if (key.name === "?") setHelp((v) => !v)
     else if (key.name === "/" || key.name === ":") {
       setCommandOpen(true)
@@ -556,6 +655,7 @@ function App() {
   })
   onCleanup(() => {
     if (demoTimer) clearInterval(demoTimer)
+    clearArmTimer()
     if (calibration) calibration.kill()
     void stopBridge()
   })
@@ -564,7 +664,7 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>{narrow() ? "v0.3" : "acoustic shortcuts  /  v0.4.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.6" : "acoustic shortcuts  /  v0.6.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -578,9 +678,9 @@ function App() {
       <Show when={help()}>
         <box marginTop={1} paddingX={2} paddingY={1} border borderColor={theme.accent} backgroundColor={theme.pane}>
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
-          <text fg={theme.text}>1–5 pages  ·  tab next  ·  space start/stop  ·  p profile  ·  v preview</text>
+          <text fg={theme.text}>1–5 pages · tab next · space start/stop · p profile · v request live · y confirm</text>
           <text fg={theme.text}>c calibrate  ·  / commands  ·  j/k select action  ·  enter edit  ·  t action type</text>
-          <text fg={theme.text}>m microphone · f toggle 4 taps · +/- sensitivity · ? help · q quit</text>
+          <text fg={theme.text}>m microphone · f 4 taps · +/- threshold · x/Esc PANIC STOP · ? help · q quit</text>
         </box>
       </Show>
       <Show when={page() === 0}>
@@ -590,7 +690,7 @@ function App() {
           </Show>
           <text fg={theme.dim}>tap your desk. trigger your workflow.</text>
           <Show when={config().detection?.noise_floor_db === undefined}>
-            <text fg={theme.amber}>Not calibrated yet · press c and follow the two steps</text>
+            <text fg={theme.amber}>Not calibrated yet · press c for quiet → typing → taps</text>
           </Show>
           <box width={panelWidth()} marginTop={2} paddingX={2} paddingY={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} gap={1}>
             <box flexDirection="row" justifyContent="space-between">
@@ -600,7 +700,7 @@ function App() {
             <text fg={theme.accent}>{narrow() ? waveText().slice(-Math.max(10, dimensions().width - 14)) : waveText()}</text>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.dim}>mic {level()} dB  /  threshold {threshold().toFixed(1)} dB</text>
-              <text fg={theme.dim}>{preview() ? "DRY RUN" : "LIVE ACTIONS"}</text>
+              <text fg={theme.dim}>{preview() ? (armState().mode === "confirm" ? "CONFIRM Y · 4s" : "DRY RUN") : "LIVE until " + new Date(armState().expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</text>
             </box>
           </box>
           <box width={panelWidth()} marginTop={1} flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={2}>
@@ -683,6 +783,7 @@ function App() {
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>
             <text fg={theme.amber}>Threshold      {threshold().toFixed(1)} dB   (+/- tunes sensitivity)</text>
             <text fg={theme.dim}>Sensitivity offset {String(config().filter?.sensitivity_offset_db ?? 0)} dB</text>
+            <text fg={theme.amber}>Live: V → Y to confirm; expires after 10 minutes. X stops immediately.</text>
             <Bar level={threshold()} />
           </box>
           <text fg={theme.dim}>Changes save atomically; previous YAML is backed up to config.yaml.bak.</text>
@@ -700,7 +801,7 @@ function App() {
       </Show>
       <Show when={commandOpen()}>
         <box marginTop={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} paddingX={2} paddingY={1}>
-          <text fg={theme.dim}>/start  /stop  /calibrate  /profile [name]  /preview  /help  /quit</text>
+          <text fg={theme.dim}>/start  /stop  /calibrate  /profile [name]  /arm  /confirm  /safe  /panic  /help</text>
           <input ref={(input) => { commandInput = input }} focused value={commandText()} onInput={setCommandText}
             textColor={theme.text} focusedTextColor={theme.text} placeholder="Type a command…" />
         </box>
@@ -708,7 +809,7 @@ function App() {
       <box paddingTop={1} border={["top"]} borderColor={theme.border} flexDirection="row" justifyContent="space-between">
         <text fg={theme.dim}>{truncate(notice(), Math.max(8, dimensions().width - (narrow() ? 10 : 67)))}</text>
         <Show when={!narrow()}>
-          <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   / <span style={{ fg: theme.text }}>command</span>   ? <span style={{ fg: theme.text }}>help</span>   q <span style={{ fg: theme.text }}>quit</span></text>
+          <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   v+y <span style={{ fg: theme.text }}>arm</span>   x <span style={{ fg: theme.amber }}>STOP</span>   ? <span style={{ fg: theme.text }}>help</span></text>
         </Show>
       </box>
     </box>

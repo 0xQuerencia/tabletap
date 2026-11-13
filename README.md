@@ -270,15 +270,8 @@ Single tap = action 1, double tap = action 2, triple tap = action 3, four taps =
 
 ## Systemd service
 
-```bash
-cp tabletap.service ~/.config/systemd/user/
-systemctl --user enable --now tabletap
-```
+Use the optional **`tabletap service install`** command documented above. Do not copy an obsolete hardcoded service file; installation uses the active Python virtual environment and does not start the service automatically.
 
-Live config reload without restart:
-```bash
-kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
-```
 
 ## Features
 
@@ -377,3 +370,26 @@ Local, machine-readable results for your own debugging:
 
 Exit codes: `0` = no detected false patterns, `1` = one or more unintended
 patterns, `2` = cannot complete the audit (microphone or config error).
+
+## Live-action safety guard (interactive TUI)
+
+The TUI always starts in **safe preview**. Press `Space` to start the
+microphone (dry-run), then `V` to request live actions. **Press `Y`
+within 4 seconds** to confirm; merely holding or repeating `V` cannot
+authorize commands. If you miss the window, it returns to preview.
+
+Live authorization lasts **a maximum of 10 minutes** and then
+automatically terminates the action-capable listener and starts safe preview
+again. Pressing `V` while live disarms immediately. Press **`X` or
+`Esc`** for a *panic stop* that immediately kills the TUI's listening
+bridge; it cannot undo a command that was already launched. Switching
+profiles, editing the config, stopping the listener, or beginning calibration
+also disarms live mode. Authorization is **never saved** between launches.
+
+From the command palette: `/arm` then `/confirm`, `/safe` to
+switch to preview, and `/panic` to stop microphone listening.
+
+**Scope:** This guard is for the interactive TUI. Explicitly enabling
+`tabletap start` or the optional always-on systemd user service
+runs commands without TUI arming; don't enable that service until your
+work-noise audit is clean.

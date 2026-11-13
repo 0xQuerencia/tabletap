@@ -177,3 +177,14 @@ lock allows only one listener. If it fails, try `tabletap doctor`.
 No microphone recordings or keyboard data are saved, and no network access is required. The usual first-run config and temporary listener lock may be created.
 
 For a structured result: `.venv/bin/tabletap audit -d 60 --json`.
+
+## Live safety controls
+
+In the TUI, `Space` first starts **safe preview**. To execute real
+shortcuts, press `V` then **`Y` within 4 seconds**. Live actions
+automatically disarm after 10 minutes; the terminal displays the deadline.
+Press **`X` or `Esc`** to kill the listening bridge immediately.
+Already-launched external commands cannot be undone. Switching a profile,
+editing the YAML, calibrating, or stopping the listener also disarms.
+The optional headless systemd user service deliberately does **not** use
+the TUI arming UI; treat it as a separate, continuously executing mode.
