@@ -60,7 +60,7 @@ tabletap tui --demo
 
 ### First-time setup
 
-1. Run `.venv/bin/tabletap` and press **c** to calibrate (stay quiet, then tap your desk).
+1. Run `.venv/bin/tabletap` and press **c**. Phase 1: stay quiet; phase 2: **type and click normally**; phase 3: tap the desk 5–10 times. This teaches the microphone what must *not* trigger shortcuts.
 2. Press **Space** to start in **safe preview mode**. Taps will be recognized without launching anything.
 3. Select actions with **2**, and switch action profiles with **p**. `Enter` edits the selected action, `t` changes its type.
 4. When the preview recognizes taps reliably, press **v** to arm live action execution. Press **Space** to stop.
@@ -75,10 +75,11 @@ You can change the microphone on Settings (**4**) using **m**. Use `.venv/bin/ta
 | `Space` | Start/stop the listener (preview-only by default) |
 | `p` | Cycle default, productivity, media and other configured profiles |
 | `v` | Toggle preview/live actions (explicitly arms command execution) |
-| `c` | Calibrate microphone (quiet phase, then tapping phase); Esc cancels |
+| `c` | Calibrate (quiet → normal work → desk taps); Esc cancels |
 | `j`/`k`, `Enter` | Select/edit a mapped action on Actions |
 | `t` | Cycle action type: exec, key, script |
 | `m` | Cycle microphone inputs on Settings |
+| `f` | Enable/disable four-tap detection on Settings (off by default) |
 | `+`/`-` | Tune sensitivity on Settings |
 | `/` | Command palette, e.g. `/start`, `/stop`, `/calibrate`, `/profile media` |
 | `?`, `q` | Help, quit |
@@ -90,8 +91,10 @@ events, and executes user-configured commands only when dry-run is off.
 **Security note:** actions run locally as your OS user. Review custom commands
 and scripts before enabling listening. Tap gestures are not authentication.
 
-**Current limitations:** This is a newly integrated implementation requiring
-real microphone and terminal testing. Hold-duration gestures remain
+**Current limitations:** Distinguishing real desk taps from nearby typing needs
+real microphone and terminal testing. If working noise is as loud as tapping,
+calibration will refuse to save new settings rather than silently turn normal
+keyboard clicks into actions. Hold-duration gestures remain
 experimental, and accessibility/noise robustness varies with microphone,
 table surface, and room conditions.
 
@@ -310,3 +313,35 @@ kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
 ## License
 
 MIT
+
+
+## Reducing accidental taps (v0.4)
+
+The detector now accepts an impact only after a **sharp onset followed by a
+quick decay**. Slow or sustained sounds are rejected. More than four acoustic
+hits in a typing burst are discarded, not incorrectly treated as four taps.
+**Four-tap actions are disabled by default**, including for existing configs:
+press `4` → `f` only if you intentionally want to enable them.
+
+Calibration now learns the sound of your normal typing and mouse clicks as
+negative examples:
+
+1. Press `c` in the interactive TUI; keep the room quiet for phase 1.
+2. In phase 2, **type at your usual speed and click your mouse**, as you
+   actually do while working. Do not tap the desk in this phase.
+3. In phase 3, stop typing and make 5–10 deliberate table taps near your laptop.
+4. Press `Space` to listen in safe preview. Test normal work for at least
+   30 seconds, inspect the Activity tab and the rejected noise count.
+5. If actual taps are missed, lower the sensitivity offset in Settings (`-`);
+   if you still get accidental taps, raise it with `+` or recalibrate.
+   Never enable live actions until the preview is reliable.
+
+The saved minimum threshold remains in effect as ambient noise changes.
+If your keyboard is as loud as the desk taps, calibration will say it
+cannot confidently separate them. Try moving the microphone or tapping
+a harder surface; acoustic software cannot guarantee zero false positives
+when the source sounds are physically indistinguishable.
+
+**Your existing configuration is preserved**; new calibration fields are
+added without deleting comments, and the previous file is saved to
+`~/.config/tabletap/config.yaml.bak`.

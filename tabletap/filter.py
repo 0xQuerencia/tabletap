@@ -64,6 +64,7 @@ class AdaptiveThreshold:
         self.snr_gate_db = snr_gate_db
         self.min_threshold_db = min_threshold_db
         self._active = False
+        self.calibration_floor_db = None
 
     def update(self, db: float, is_spike: bool):
         if is_spike:
@@ -79,12 +80,16 @@ class AdaptiveThreshold:
         else:
             self.threshold_db = self.noise_floor_db + self.snr_gate_db
 
-        self.threshold_db = max(self.threshold_db, self.min_threshold_db)
+        self.threshold_db = max(
+            self.threshold_db, self.min_threshold_db,
+            self.calibration_floor_db if self.calibration_floor_db is not None else self.min_threshold_db,
+        )
 
     def is_above(self, db: float) -> bool:
         return db > self.threshold_db
 
-    def set_from_calibration(self, noise_floor_db: float, slam_peak_db: float):
+    def set_from_calibration(self, noise_floor_db: float, slam_peak_db: float,
+                             threshold_db: float | None = None):
         self.noise_floor_db = noise_floor_db
         self.peak_db = slam_peak_db
         gap = slam_peak_db - noise_floor_db
@@ -92,6 +97,11 @@ class AdaptiveThreshold:
             self.threshold_db = noise_floor_db + gap * 0.35
         else:
             self.threshold_db = noise_floor_db + self.snr_gate_db
+        # Saved calibration is a hard floor: adaptive drift must not
+        # reclassify quiet keyboard sounds as desk taps.
+        if threshold_db is not None:
+            self.calibration_floor_db = float(threshold_db)
+            self.threshold_db = max(self.threshold_db, self.calibration_floor_db)
 
     def get_state(self) -> dict:
         return {
@@ -129,3 +139,55 @@ class OnsetDetector:
 
         return False
 
+
+
+class ImpactDetector:
+    """Require a sharp rise followed by a rapid decay before accepting a tap.
+
+    Slow changes and sounds that stay loud (voices, scraping, music) cannot
+    produce a confirmed impact. False positives should fail closed.
+    """
+
+    def __init__(self, min_gap_ms: int = 150, max_width_ms: int = 220,
+                 min_attack_db: float = 7.0):
+        self.min_gap = min_gap_ms / 1000.0
+        self.max_width = max_width_ms / 1000.0
+        self.min_attack_db = float(min_attack_db)
+        self._previous_db = None
+        self._pending_since = None
+        self._last_accepted_at = float("-inf")
+        self._armed = True
+        self.rejected_reason = None
+
+    def feed(self, db: float, threshold_db: float, now: float) -> bool:
+        self.rejected_reason = None
+        rise = 0.0 if self._previous_db is None else db - self._previous_db
+        self._previous_db = db
+        active = db > threshold_db
+        if self._pending_since is not None:
+            if active:
+                if now - self._pending_since > self.max_width:
+                    self.rejected_reason = "sustained noise"
+                    self._pending_since = None
+                return False
+            duration = now - self._pending_since
+            self._pending_since = None
+            self._armed = True
+            if duration > self.max_width:
+                self.rejected_reason = "sound too long"
+                return False
+            if now - self._last_accepted_at < self.min_gap:
+                self.rejected_reason = "echo / too close"
+                return False
+            self._last_accepted_at = now
+            return True
+
+        if not active:
+            self._armed = True
+        elif self._armed:
+            self._armed = False
+            if rise >= self.min_attack_db:
+                self._pending_since = now
+            else:
+                self.rejected_reason = "slow onset"
+        return False

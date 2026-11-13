@@ -16,7 +16,7 @@ import yaml
 
 from .action import ActionRunner
 from .config import init_config, load_config
-from .filter import AdaptiveThreshold, OnsetDetector
+from .filter import AdaptiveThreshold, ImpactDetector
 from .lock import PIDLock
 from .mic import MicCapture, MicDisconnected, rms_db
 from .pattern import PatternDetector
@@ -70,7 +70,7 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
     noise = detection.get("noise_floor_db")
     peak = detection.get("slam_peak_db")
     if noise is not None and peak is not None:
-        threshold.set_from_calibration(noise, peak)
+        threshold.set_from_calibration(noise, peak, detection.get('threshold_db'))
 
     pattern = PatternDetector(
         min_gap_ms=detection.get("min_gap_ms", 150),
@@ -81,7 +81,11 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         hold_repeat_ms=detection.get("hold_repeat_ms", 500),
         enable_hold=detection.get("enable_hold_gestures", False),
     )
-    onset = OnsetDetector(min_gap_ms=detection.get("min_gap_ms", 150))
+    impact = ImpactDetector(
+        min_gap_ms=detection.get("min_gap_ms", 150),
+        max_width_ms=detection.get("max_impact_ms", 220),
+        min_attack_db=detection.get("min_attack_db", 7.0),
+    )
     runner = ActionRunner(
         cfg.get("actions", {}),
         category=category,
@@ -108,6 +112,9 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         if event is None:
             return
         key = event.key()
+        if key == "quadruple" and not detection.get("enable_four_taps", False):
+            emit("rejected", reason="four-tap gesture disabled for safety")
+            return
         action = runner._get_action(key)
         name = action.get("name") or action.get("value") if action else "unmapped"
         executable = isinstance(action, dict) and bool(str(action.get("value", "")).strip())
@@ -129,11 +136,13 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
                 spike = bool(db > threshold.threshold_db + sensitivity_offset)
                 # Feed the energy derivative on *every* chunk. Skipping silence
                 # otherwise leaves the onset detector with stale energy.
-                started = onset.feed(db, now, active=spike)
-                if spike and started:
+                confirmed = impact.feed(db, threshold.threshold_db + sensitivity_offset, now)
+                if confirmed:
                     handle(pattern.feed())
-                elif not spike:
+                if not spike:
                     handle(pattern.on_silence())
+                if impact.rejected_reason and impact.rejected_reason != "echo / too close":
+                    emit("rejected", reason=impact.rejected_reason)
                 threshold.update(db, spike)
                 handle(pattern.check_window_timeout())
                 if now - last_level_at >= 0.1:

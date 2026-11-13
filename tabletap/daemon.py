@@ -6,7 +6,7 @@ import subprocess
 import shutil
 
 from .mic import MicCapture, rms_db, MicDisconnected
-from .filter import AdaptiveThreshold, OnsetDetector
+from .filter import AdaptiveThreshold, ImpactDetector
 from .pattern import PatternDetector
 from .action import ActionRunner
 from .calibrate import auto_calibrate
@@ -51,12 +51,16 @@ class Daemon:
             peak_alpha=self.filter_cfg.get("peak_alpha", 0.1),
             snr_gate_db=self.filter_cfg.get("snr_gate_db", 6.0),
         )
-        self.onset = OnsetDetector(min_gap_ms=self.detect_cfg.get("min_gap_ms", 150))
+        self.impact = ImpactDetector(
+            min_gap_ms=self.detect_cfg.get("min_gap_ms", 150),
+            max_width_ms=self.detect_cfg.get("max_impact_ms", 220),
+            min_attack_db=self.detect_cfg.get("min_attack_db", 7.0),
+        )
 
         saved_noise = self.detect_cfg.get("noise_floor_db")
         saved_peak = self.detect_cfg.get("slam_peak_db")
         if saved_noise is not None and saved_peak is not None:
-            self.threshold.set_from_calibration(saved_noise, saved_peak)
+            self.threshold.set_from_calibration(saved_noise, saved_peak, self.detect_cfg.get('threshold_db'))
             log.info("Loaded calibration: noise=%.1f peak=%.1f threshold=%.1f",
                      saved_noise, saved_peak, self.threshold.threshold_db)
 
@@ -94,7 +98,7 @@ class Daemon:
             log.info("No calibration found, running auto-calibrate...")
             result = auto_calibrate(self.cfg)
             save_calibration(self.cfg, result)
-            self.threshold.set_from_calibration(result["noise_floor_db"], result["slam_peak_db"])
+            self.threshold.set_from_calibration(result["noise_floor_db"], result["slam_peak_db"], result["threshold_db"])
             log.info("Auto-calibration done: noise=%.1f peak=%.1f threshold=%.1f",
                      result["noise_floor_db"], result["slam_peak_db"], self.threshold.threshold_db)
 
@@ -115,35 +119,32 @@ class Daemon:
                     is_spike = bool(float(db) > self.threshold.threshold_db + self.sensitivity_offset)
                     # Feed the onset detector for quiet frames too, otherwise
                     # its baseline stays stale and isolated taps are missed.
-                    detected = self.onset.feed(db, now, active=is_spike)
-
-                    if is_spike:
-                        self.threshold.update(db, True)
-                        if detected:
-                            event = self.pattern_detector.feed()
-                            if event:
-                                log.info("TAP -> %s (threshold: %.1f dB)", event.key(), self.threshold.threshold_db)
-                                self._notify(event.key())
-                                self.action_runner.run(event.key())
-                    else:
-                        self.threshold.update(db, False)
-                        event = self.pattern_detector.on_silence()
-                        if event:
-                            log.info("HOLD -> %s", event.key())
-                            self._notify(event.key())
-                            self.action_runner.run(event.key())
-
-                    timeout_event = self.pattern_detector.check_window_timeout()
-                    if timeout_event:
-                        log.info("RHYTHM -> %s", timeout_event.key())
-                        self._notify(timeout_event.key())
-                        self.action_runner.run(timeout_event.key())
+                    confirmed = self.impact.feed(
+                        db, self.threshold.threshold_db + self.sensitivity_offset, now,
+                    )
+                    if confirmed:
+                        self.pattern_detector.feed()
+                    if not is_spike:
+                        self._dispatch(self.pattern_detector.on_silence())
+                    self.threshold.update(db, is_spike)
+                    self._dispatch(self.pattern_detector.check_window_timeout())
         except MicDisconnected as e:
             log.error("Microphone permanently disconnected: %s", e)
             self.lock.release()
             sys.exit(1)
 
         log.info("tabletap stopped.")
+
+    def _dispatch(self, event):
+        if event is None:
+            return
+        key = event.key()
+        if key == "quadruple" and not self.detect_cfg.get("enable_four_taps", False):
+            log.debug("Ignored disabled four-tap gesture")
+            return
+        log.info("Tap pattern: %s", key)
+        self._notify(key)
+        self.action_runner.run(key)
 
     def _notify(self, pattern: str):
         if not self._notifications_enabled:

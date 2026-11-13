@@ -55,9 +55,9 @@ you have an older, broken executable on your PATH; invoke
 reinstalling system Python. **Never use `sudo pip` or
 `--break-system-packages`.**
 
-When the demo looks correct, run `.venv/bin/tabletap`. Press `c` to calibrate.
-**Keep the room quiet for the first phase**, then tap 5–10 times when the
-TUI shows **TAP YOUR DESK**. Calibration saves local acoustic thresholds
+When the demo looks correct, run `.venv/bin/tabletap`. Press `c` to calibrate: keep quiet in phase 1, type/click normally in phase 2, then tap the desk in phase 3.
+**Keep the room quiet in phase 1**, type on your keyboard and use your mouse
+normally during phase 2 (negative examples), and tap 5–10 times in phase 3. Calibration saves local acoustic thresholds
 in `~/.config/tabletap/config.yaml`.
 
 On the Home screen, press `Space` to listen in **preview-only mode** (no commands executed). Verify each tap sequence, then press `v` when you explicitly want to arm live actions. You can switch profiles with
@@ -146,3 +146,22 @@ systemctl --user disable --now tabletap.service
 .venv/bin/tabletap service uninstall
 systemctl --user daemon-reload
 ```
+
+
+## False-positive troubleshooting
+
+If random four-tap detections switch your windows while you're typing,
+upgrade to v0.4 and recalibrate. Four-tap execution now requires opting in:
+Settings (key `4`) → `f`. The acoustic gate rejects sustained noise
+and bursts of five or more impacts instead of classifying them as four taps.
+
+After calibration, press `Space` for safe preview. **Type and click normally
+for 30 seconds without deliberate taps**. If a single/double/triple gesture
+appears anyway, raise the sensitivity offset using `+` on Settings or
+recalibrate in your normal working environment. Press `5` for Activity
+and inspect rejected sound diagnostics.
+
+If intentional desk taps fail during calibration, your keyboard/mouse and
+desk tapping are too close in loudness for the current mic placement.
+Use a harder tap surface or a closer microphone. Do not arm actions with
+`v` until the safe preview stops falsely detecting ordinary work.

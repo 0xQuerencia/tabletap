@@ -41,7 +41,7 @@ def monitor_cmd(cfg: dict):
     saved_noise = cfg.get("detection", {}).get("noise_floor_db")
     saved_peak = cfg.get("detection", {}).get("slam_peak_db")
     if saved_noise is not None and saved_peak is not None:
-        threshold.set_from_calibration(saved_noise, saved_peak)
+        threshold.set_from_calibration(saved_noise, saved_peak, cfg.get('detection', {}).get('threshold_db'))
 
     sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
     sos = None
@@ -75,7 +75,7 @@ def test_cmd(cfg: dict, duration: int):
     import time
     from .mic import MicCapture, rms_db
     from .pattern import PatternDetector
-    from .filter import OnsetDetector
+    from .filter import ImpactDetector
 
     print(f"[tabletap test] Testing tap detection for {duration} seconds...")
     print("[tabletap test] Detected patterns will be printed (no actions executed)\n")
@@ -94,7 +94,7 @@ def test_cmd(cfg: dict, duration: int):
     saved_noise = detect_cfg.get("noise_floor_db")
     saved_peak = detect_cfg.get("slam_peak_db")
     if saved_noise is not None and saved_peak is not None:
-        threshold.set_from_calibration(saved_noise, saved_peak)
+        threshold.set_from_calibration(saved_noise, saved_peak, detect_cfg.get('threshold_db'))
 
     pattern_detector = PatternDetector(
         min_gap_ms=detect_cfg.get("min_gap_ms", 150),
@@ -105,7 +105,11 @@ def test_cmd(cfg: dict, duration: int):
         hold_repeat_ms=detect_cfg.get("hold_repeat_ms", 500),
         enable_hold=detect_cfg.get("enable_hold_gestures", False),
     )
-    onset = OnsetDetector(min_gap_ms=detect_cfg.get("min_gap_ms", 80))
+    impact = ImpactDetector(
+        min_gap_ms=detect_cfg.get("min_gap_ms", 150),
+        max_width_ms=detect_cfg.get("max_impact_ms", 220),
+        min_attack_db=detect_cfg.get("min_attack_db", 7.0),
+    )
 
     print(f"[tabletap test] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB\n")
 
@@ -119,27 +123,16 @@ def test_cmd(cfg: dict, duration: int):
 
                 is_spike = bool(float(db) > threshold.threshold_db + sensitivity_offset)
                 # Keep the onset baseline updated during silence too.
-                detected = onset.feed(db, now, active=is_spike)
-
-                if is_spike:
-                    threshold.update(db, True)
-                    if detected:
-                        event = pattern_detector.feed()
-                        if event:
-                            timestamp = time.strftime("%H:%M:%S")
-                            print(f"\n[{timestamp}] Detected: {event.key().upper()}")
-                else:
-                    threshold.update(db, False)
-                    event = pattern_detector.on_silence()
-                    if event:
-                        timestamp = time.strftime("%H:%M:%S")
-                        print(f"\n[{timestamp}] Detected: {event.key().upper()}")
-
-                timeout_event = pattern_detector.check_window_timeout()
-                if timeout_event:
+                confirmed = impact.feed(db, threshold.threshold_db + sensitivity_offset, now)
+                if confirmed:
+                    pattern_detector.feed()
+                if not is_spike:
+                    pattern_detector.on_silence()
+                threshold.update(db, is_spike)
+                event = pattern_detector.check_window_timeout()
+                if event and (event.key() != "quadruple" or detect_cfg.get("enable_four_taps", False)):
                     timestamp = time.strftime("%H:%M:%S")
-                    print(f"\n[{timestamp}] Detected: {timeout_event.key().upper()}")
-
+                    print(f"\n[{timestamp}] Detected: {event.key().upper()}")
                 bar_db = max(0, db + 100)
                 bar_len = int(bar_db / 2)
                 bar = "#" * min(bar_len, 50)

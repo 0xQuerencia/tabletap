@@ -125,8 +125,9 @@ def save_calibration(cfg: dict, calibration: dict, path: Path | None = None) -> 
     detection = document.setdefault("detection", {})
     if not isinstance(detection, dict):
         raise ValueError("Cannot save calibration: detection must be a mapping")
-    for name in ("noise_floor_db", "slam_peak_db", "threshold_db"):
-        detection[name] = float(calibration[name])
+    for name in ("noise_floor_db", "slam_peak_db", "threshold_db", "work_peak_db"):
+        if name in calibration:
+            detection[name] = float(calibration[name])
 
     temporary_path = None
     try:
@@ -150,6 +151,7 @@ def save_calibration(cfg: dict, calibration: dict, path: Path | None = None) -> 
     # Existing callers can continue using their in-memory calibrated values.
     cfg.setdefault("detection", {}).update({
         key: float(calibration[key])
-        for key in ("noise_floor_db", "slam_peak_db", "threshold_db")
+        for key in ("noise_floor_db", "slam_peak_db", "threshold_db", "work_peak_db")
+        if key in calibration
     })
     return path
