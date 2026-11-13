@@ -63,7 +63,7 @@ tabletap tui --demo
 1. Run `.venv/bin/tabletap` and press **c**. Phase 1: stay quiet; phase 2: **type and click normally**; phase 3: tap the desk 5–10 times. This teaches the microphone what must *not* trigger shortcuts.
 2. Press **Space** to start in **safe preview mode**. Taps will be recognized without launching anything.
 3. Select actions with **2**, and switch action profiles with **p**. `Enter` edits the selected action, `t` changes its type.
-4. When the preview recognizes taps reliably, press **v** to arm live action execution. Press **Space** to stop.
+4. After a clean work-noise audit, press **v**, then **y** within 4 seconds to arm live actions for up to 10 minutes. Press **x** or **Esc** to panic-stop.
 
 You can change the microphone on Settings (**4**) using **m**. Use `.venv/bin/tabletap devices` to list input devices. All action and sensitivity edits preserve YAML comments, write a `config.yaml.bak` backup, and restart the listener if needed.
 
@@ -74,14 +74,15 @@ You can change the microphone on Settings (**4**) using **m**. Use `.venv/bin/ta
 | `1`–`5`, `Tab`, `←`/`→` | Switch Home, Actions, Calibrate, Settings, Activity |
 | `Space` | Start/stop the listener (preview-only by default) |
 | `p` | Cycle default, productivity, media and other configured profiles |
-| `v` | Toggle preview/live actions (explicitly arms command execution) |
+| `v`, then `y` | Request then confirm live actions; expires after 10 minutes |
+| `x`, `Esc` | Panic-stop microphone listener and disarm action execution |
 | `c` | Calibrate (quiet → normal work → desk taps); Esc cancels |
 | `j`/`k`, `Enter` | Select/edit a mapped action on Actions |
 | `t` | Cycle action type: exec, key, script |
 | `m` | Cycle microphone inputs on Settings |
 | `f` | Enable/disable four-tap detection on Settings (off by default) |
 | `+`/`-` | Tune sensitivity on Settings |
-| `/` | Command palette, e.g. `/start`, `/stop`, `/calibrate`, `/profile media` |
+| `/` | Command palette, e.g. `/start`, `/stop`, `/arm`, `/confirm`, `/safe`, `/panic`, `/profile media` |
 | `?`, `q` | Help, quit |
 
 Action edits are persisted atomically without discarding YAML comments; the previous file is saved as `config.yaml.bak`. An active listener restarts after edits. The JSON-lines bridge is internal and can be invoked
@@ -155,6 +156,8 @@ The interactive TUI starts in a safe stopped state. Press `c` for guided calibra
 | `tabletap status` | Show current config |
 | `tabletap devices` | List input microphones and their device indices |
 | `tabletap devices --json` | Machine-readable microphone discovery |
+| `tabletap audit -d 60` | Observe false positives while typing; strictly no actions and no recorded audio |
+| `tabletap audit -d 60 --json` | Local, machine-readable audit summary |
 | `tabletap service install` | Generate an optional headless systemd user unit using the active Python interpreter |
 | `tabletap doctor` | Validate installation, microphone and shortcut tools |
 
@@ -165,11 +168,9 @@ The interactive TUI starts in a safe stopped state. Press `c` for guided calibra
 | Single tap | 1 tap within 800ms | Launch Spotify |
 | Double tap | 2 taps within 800ms | Open Gmail |
 | Triple tap | 3 taps within 800ms | Open YouTube |
-| Four taps | 4 taps within 800ms | Alt+Tab |
-| Long press | 500ms-2s hold | Alt+Tab |
-| Medium hold | 2s-4s hold | Volume +5% |
-| Extended hold | 4s+ hold | Lock screen |
-| Hold repeat | Every 500ms during sustained hold | Volume +2% |
+| Four taps | 4 taps within 800ms | **Disabled by default** (opt in with Settings `f`; existing Alt+Tab mapping is not armed) |
+
+Hold-duration gestures have experimental mappings in the configuration but are **disabled by default** because acoustic input cannot reliably measure physical pressure.
 
 ## Configuration
 
@@ -194,6 +195,10 @@ filter:
 detection:
   min_gap_ms: 150
   rhythm_window_ms: 800
+  enable_four_taps: false
+  enable_hold_gestures: false
+  min_attack_db: 7.0
+  max_impact_ms: 220
   long_press_ms: 500
   medium_hold_ms: 2000
   long_hold_ms: 4000
@@ -270,22 +275,15 @@ Single tap = action 1, double tap = action 2, triple tap = action 3, four taps =
 
 ## Systemd service
 
-```bash
-cp tabletap.service ~/.config/systemd/user/
-systemctl --user enable --now tabletap
-```
+Use the optional **`tabletap service install`** command documented above. Do not copy an obsolete hardcoded service file; installation uses the active Python virtual environment and does not start the service automatically.
 
-Live config reload without restart:
-```bash
-kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
-```
 
 ## Features
 
 - Bandpass filter (50-800Hz) isolates desk impacts from speech and ambient noise
-- Adaptive threshold auto-tunes to your environment
-- Onset detection via energy derivative for precise tap timing
-- Debounced silence prevents false long-press triggers
+- Adaptive threshold with a calibration minimum learned from normal typing/mouse noise
+- Sharp-onset/short-decay impact validation (filters slow/sustained sounds)
+- More-than-four-hit bursts discarded instead of misclassified as four taps
 - Async action execution via thread pool (never blocks detection)
 - Mic reconnection with exponential backoff on disconnect
 - PID lock prevents multiple daemon instances
@@ -293,7 +291,7 @@ kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
 - Desktop notifications via notify-send
 - Config validation with warnings on invalid values
 - SIGHUP reload config without restarting
-- Systemd hardened (ProtectSystem, NoNewPrivileges, PrivateTmp)
+- Optional user-scoped systemd unit generated for the active virtual environment (disabled until explicitly enabled)
 - Automated tests with mocked and synthesized audio plus OpenTUI pseudo-terminal smoke tests
 
 ## Requirements
@@ -377,3 +375,30 @@ Local, machine-readable results for your own debugging:
 
 Exit codes: `0` = no detected false patterns, `1` = one or more unintended
 patterns, `2` = cannot complete the audit (microphone or config error).
+
+## Live-action safety guard (interactive TUI)
+
+The TUI always starts in **safe preview**. Press `Space` to start the
+microphone (dry-run), then `V` to request live actions. **Press `Y`
+within 4 seconds** to confirm; merely holding or repeating `V` cannot
+authorize commands. If you miss the window, it returns to preview.
+
+Live authorization lasts **a maximum of 10 minutes** and then
+automatically terminates the action-capable listener and starts safe preview
+again. Pressing `V` while live disarms immediately. Press **`X` or
+`Esc`** for a *panic stop* that immediately kills the TUI's listening
+bridge; it cannot undo a command that was already launched. Switching
+profiles, editing the config, stopping the listener, or beginning calibration
+also disarms live mode. Authorization is **never saved** between launches.
+
+From the command palette: `/arm` then `/confirm`, `/safe` to
+switch to preview, and `/panic` to stop microphone listening.
+
+**Scope:** This guard is for the interactive TUI. Explicitly enabling
+`tabletap start` or the optional always-on systemd user service
+runs commands without TUI arming; don't enable that service until your
+work-noise audit is clean.
+
+The 10-minute limit is enforced twice: by the TUI countdown **and**
+independently inside the Python action-capable audio bridge. A frozen terminal
+UI therefore cannot silently keep the bridge armed beyond its authorization.

@@ -5,7 +5,7 @@
   "scripts": {
     "start": "bun run index.tsx",
     "check": "tsc --noEmit",
-    "test": "bun test ./config-store.test.ts"
+    "test": "bun test ./config-store.test.ts ./safety.test.ts"
   },
   "dependencies": {
     "@opentui/core": "^0.8.3",

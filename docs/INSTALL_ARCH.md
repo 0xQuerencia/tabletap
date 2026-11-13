@@ -60,7 +60,7 @@ When the demo looks correct, run `.venv/bin/tabletap`. Press `c` to calibrate: k
 normally during phase 2 (negative examples), and tap 5–10 times in phase 3. Calibration saves local acoustic thresholds
 in `~/.config/tabletap/config.yaml`.
 
-On the Home screen, press `Space` to listen in **preview-only mode** (no commands executed). Verify each tap sequence, then press `v` when you explicitly want to arm live actions. You can switch profiles with
+On the Home screen, press `Space` to listen in **preview-only mode** (no commands executed). Verify each tap sequence, then press **`v` followed by `y` within 4 seconds** when you explicitly want to arm live actions. You can switch profiles with
 `p`, inspect activity with `5`, and quit with `q`.
 
 ## 3. Verify the microphone
@@ -100,8 +100,8 @@ authentication.
 
 Hold gestures are experimental and disabled by default because
 sustained physical pressure cannot be inferred reliably from a
-microphone. Single/double/triple/four-tap rhythms are the supported
-default interaction.
+microphone. Single/double/triple-tap rhythms are the default interaction; four-tap
+execution is disabled unless you explicitly opt in.
 
 ## 5. Troubleshooting
 
@@ -151,7 +151,7 @@ systemctl --user daemon-reload
 ## False-positive troubleshooting
 
 If random four-tap detections switch your windows while you're typing,
-upgrade to v0.4 and recalibrate. Four-tap execution now requires opting in:
+upgrade to v0.6 and recalibrate. Four-tap execution now requires opting in:
 Settings (key `4`) → `f`. The acoustic gate rejects sustained noise
 and bursts of five or more impacts instead of classifying them as four taps.
 
@@ -163,8 +163,8 @@ and inspect rejected sound diagnostics.
 
 If intentional desk taps fail during calibration, your keyboard/mouse and
 desk tapping are too close in loudness for the current mic placement.
-Use a harder tap surface or a closer microphone. Do not arm actions with
-`v` until the safe preview stops falsely detecting ordinary work.
+Use a harder tap surface or a closer microphone. Do not arm actions with `v` then `y` until the safe preview stops
+falsely detecting ordinary work.
 
 ## Validate false positives while working (offline)
 
@@ -177,3 +177,14 @@ lock allows only one listener. If it fails, try `tabletap doctor`.
 No microphone recordings or keyboard data are saved, and no network access is required. The usual first-run config and temporary listener lock may be created.
 
 For a structured result: `.venv/bin/tabletap audit -d 60 --json`.
+
+## Live safety controls
+
+In the TUI, `Space` first starts **safe preview**. To execute real
+shortcuts, press `V` then **`Y` within 4 seconds**. Live actions
+automatically disarm after 10 minutes; the terminal displays the deadline.
+Press **`X` or `Esc`** to kill the listening bridge immediately.
+Already-launched external commands cannot be undone. Switching a profile,
+editing the YAML, calibrating, or stopping the listener also disarms.
+The optional headless systemd user service deliberately does **not** use
+the TUI arming UI; treat it as a separate, continuously executing mode.
