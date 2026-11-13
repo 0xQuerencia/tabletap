@@ -359,8 +359,9 @@ executing an action**:
 the desk. TableTap runs the same acoustic bridge as the TUI but forces
 `--dry-run`, counts unintended single/double/triple/four patterns, lists
 rejected noise, and reports the microphone's maximum level and threshold
-headroom. It records **no audio and no keys**, writes no files, and requires
-no network or Bun runtime. An already-running listener must be stopped
+headroom. It records **no audio and no keys**, does not save a report by default,
+and requires no network or Bun runtime. As with ordinary listening, TableTap
+may create its initial configuration and a temporary single-listener lock. An already-running listener must be stopped
 first; the existing PID lock prevents racing listeners.
 
 A passing 60-second audit is useful evidence but not proof of zero false
