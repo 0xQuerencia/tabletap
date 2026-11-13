@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import signal
 import sys
 import time
@@ -19,6 +20,7 @@ from .mic import MicCapture, MicDisconnected, rms_db
 from .pattern import PatternDetector
 
 log = logging.getLogger(__name__)
+_emit_lock = threading.Lock()
 
 
 def emit(kind: str, **fields) -> None:
@@ -27,8 +29,13 @@ def emit(kind: str, **fields) -> None:
             return value.item()  # NumPy scalar to a native JSON type.
         raise TypeError(f"Unsupported bridge value: {type(value).__name__}")
 
-    print(json.dumps({"type": kind, **fields},
-                     separators=(",", ":"), default=scalar), flush=True)
+    line = json.dumps({"type": kind, **fields},
+                      separators=(",", ":"), default=scalar)
+    # Worker threads can finish launching actions while the mic emits levels.
+    # Serialize a complete JSON line per write for the terminal bridge.
+    with _emit_lock:
+        sys.stdout.write(line + "\\n")
+        sys.stdout.flush()
 
 
 def run_bridge(config_path=None, category=None, dry_run=False) -> int:
@@ -69,7 +76,13 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         enable_hold=detection.get("enable_hold_gestures", False),
     )
     onset = OnsetDetector(min_gap_ms=detection.get("min_gap_ms", 150))
-    runner = ActionRunner(cfg.get("actions", {}), category=category)
+    runner = ActionRunner(
+        cfg.get("actions", {}),
+        category=category,
+        on_result=lambda pattern, status, message: emit(
+            "action_result", pattern=pattern, status=status, message=message
+        ),
+    )
     lock = PIDLock()
     if not lock.acquire():
         emit("error", message="Another TableTap listener is already running")
@@ -91,8 +104,9 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
         key = event.key()
         action = runner._get_action(key)
         name = action.get("name") or action.get("value") if action else "unmapped"
-        emit("gesture", pattern=key, action=name, dispatched=bool(action) and not dry_run)
-        if action and not dry_run:
+        executable = isinstance(action, dict) and bool(str(action.get("value", "")).strip())
+        emit("gesture", pattern=key, action=name, dispatched=executable and not dry_run)
+        if executable and not dry_run:
             runner.run(key)
 
     try:
