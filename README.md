@@ -58,23 +58,32 @@ Run `tabletap doctor` to check your microphone, Bun installation and keyboard to
 tabletap tui --demo
 ```
 
+### First-time setup
+
+1. Run `.venv/bin/tabletap` and press **c** to calibrate (stay quiet, then tap your desk).
+2. Press **Space** to start in **safe preview mode**. Taps will be recognized without launching anything.
+3. Select actions with **2**, and switch action profiles with **p**. `Enter` edits the selected action, `t` changes its type.
+4. When the preview recognizes taps reliably, press **v** to arm live action execution. Press **Space** to stop.
+
+You can change the microphone on Settings (**4**) using **m**. Use `.venv/bin/tabletap devices` to list input devices. All action and sensitivity edits preserve YAML comments, write a `config.yaml.bak` backup, and restart the listener if needed.
+
 ### Keyboard controls
 
 | Key | Effect |
 | --- | --- |
 | `1`–`5`, `Tab`, `←`/`→` | Switch Home, Actions, Calibrate, Settings, Activity |
-| `Space` | Start/stop the listener |
+| `Space` | Start/stop the listener (preview-only by default) |
 | `p` | Cycle default, productivity, media and other configured profiles |
-| `v` | Toggle preview (detect without executing actions) |
-| `c` | Calibrate microphone (quiet phase, then tapping phase) |
+| `v` | Toggle preview/live actions (explicitly arms command execution) |
+| `c` | Calibrate microphone (quiet phase, then tapping phase); Esc cancels |
 | `j`/`k`, `Enter` | Select/edit a mapped action on Actions |
 | `t` | Cycle action type: exec, key, script |
-| `+`/`-` | Tune threshold on Settings |
+| `m` | Cycle microphone inputs on Settings |
+| `+`/`-` | Tune sensitivity on Settings |
 | `/` | Command palette, e.g. `/start`, `/stop`, `/calibrate`, `/profile media` |
 | `?`, `q` | Help, quit |
 
-Action edits are persisted to the YAML file, and an active listener is
-restarted after edits. The JSON-lines bridge is internal and can be invoked
+Action edits are persisted atomically without discarding YAML comments; the previous file is saved as `config.yaml.bak`. An active listener restarts after edits. The JSON-lines bridge is internal and can be invoked
 with `tabletap bridge --dry-run`. It reports live levels and gesture/action
 events, and executes user-configured commands only when dry-run is off.
 
@@ -104,7 +113,7 @@ No extra hardware needed. Just your laptop mic and a hard desk surface.
 .venv/bin/tabletap start         # start listening (headless)
 ```
 
-First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns your slam intensity.
+The interactive TUI starts in a safe stopped state. Press `c` for guided calibration; `tabletap start` (headless daemon) auto-calibrates when no saved calibration is present.
 
 ## Commands
 
@@ -117,6 +126,9 @@ First run auto-calibrates. Tap the table 5-10 times during phase 2 so it learns 
 | `tabletap monitor` | Watch mic levels and spikes in real-time |
 | `tabletap test -d 15` | Dry-run mode: detect taps for 15s, no actions executed |
 | `tabletap status` | Show current config |
+| `tabletap devices` | List input microphones and their device indices |
+| `tabletap devices --json` | Machine-readable microphone discovery |
+| `tabletap doctor` | Validate installation, microphone and shortcut tools |
 
 ## Tap patterns
 
@@ -249,12 +261,12 @@ kill -HUP $(cat ~/.cache/tabletap/daemon.pid)
 - Async action execution via thread pool (never blocks detection)
 - Mic reconnection with exponential backoff on disconnect
 - PID lock prevents multiple daemon instances
-- Wayland support (wlrctl/ydotool) with X11 fallback (xdotool)
+- Wayland support (wtype/ydotool) and X11 support (xdotool)
 - Desktop notifications via notify-send
 - Config validation with warnings on invalid values
 - SIGHUP reload config without restarting
 - Systemd hardened (ProtectSystem, NoNewPrivileges, PrivateTmp)
-- 53 tests with mocked PyAudio (no hardware required)
+- Automated tests with mocked and synthesized audio plus OpenTUI pseudo-terminal smoke tests
 
 ## Requirements
 
