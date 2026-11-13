@@ -174,6 +174,6 @@ typing and using your mouse *without tapping deliberately*; it reports
 unintended gestures and rejected sounds, plus threshold headroom.
 Stop the interactive listener or background service first, since the PID
 lock allows only one listener. If it fails, try `tabletap doctor`.
-No microphone recordings, keyboard data, or network connections are made.
+No microphone recordings or keyboard data are saved, and no network access is required. The usual first-run config and temporary listener lock may be created.
 
 For a structured result: `.venv/bin/tabletap audit -d 60 --json`.
