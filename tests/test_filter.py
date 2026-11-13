@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 from tabletap.filter import make_bandpass, StatefulBandpass, AdaptiveThreshold
 
 
