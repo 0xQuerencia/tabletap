@@ -35,19 +35,23 @@ class Daemon:
             min_gap_ms=self.detect_cfg.get("min_gap_ms", 150),
             rhythm_window_ms=self.detect_cfg.get("rhythm_window_ms", 800),
             long_press_ms=self.detect_cfg.get("long_press_ms", 500),
+            medium_hold_ms=self.detect_cfg.get("medium_hold_ms", 2000),
+            long_hold_ms=self.detect_cfg.get("long_hold_ms", 4000),
+            hold_repeat_ms=self.detect_cfg.get("hold_repeat_ms", 500),
             enable_hold=self.detect_cfg.get("enable_hold_gestures", False),
         )
         self._notifications_enabled = self.feedback_cfg.get("notifications", True)
         self._notification_urgency = self.feedback_cfg.get("notification_urgency", "low")
 
         self.adaptive = self.filter_cfg.get("adaptive", True)
+        self.sensitivity_offset = float(self.filter_cfg.get("sensitivity_offset_db", 0.0))
         self.threshold = AdaptiveThreshold(
             initial_threshold_db=self.detect_cfg.get("threshold_db", -30),
             noise_alpha=self.filter_cfg.get("noise_alpha", 0.05),
             peak_alpha=self.filter_cfg.get("peak_alpha", 0.1),
             snr_gate_db=self.filter_cfg.get("snr_gate_db", 6.0),
         )
-        self.onset = OnsetDetector(min_gap_ms=self.detect_cfg.get("min_gap_ms", 80))
+        self.onset = OnsetDetector(min_gap_ms=self.detect_cfg.get("min_gap_ms", 150))
 
         saved_noise = self.detect_cfg.get("noise_floor_db")
         saved_peak = self.detect_cfg.get("slam_peak_db")
@@ -108,7 +112,7 @@ class Daemon:
                     db = rms_db(filtered)
                     now = time.monotonic()
 
-                    is_spike = self.threshold.is_above(db)
+                    is_spike = bool(float(db) > self.threshold.threshold_db + self.sensitivity_offset)
                     # Feed the onset detector for quiet frames too, otherwise
                     # its baseline stays stale and isolated taps are missed.
                     detected = self.onset.feed(db, now, active=is_spike)

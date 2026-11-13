@@ -105,6 +105,30 @@ tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz
 
 No extra hardware needed. Just your laptop mic and a hard desk surface.
 
+## Background mode (optional)
+
+The main OpenTUI application runs interactively and does **not** start a
+background daemon automatically. If you want TableTap to listen after a
+graphical login, install a user-scoped service generated with the exact
+Python interpreter from your virtual environment:
+
+```bash
+.venv/bin/tabletap service install
+systemctl --user daemon-reload
+# On Hyprland: import your session variables before starting:
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
+systemctl --user enable --now tabletap.service
+```
+
+This mode **executes configured actions** instead of running the TUI's
+safe-preview mode, so review your mappings before enabling it. Stop the
+service before starting the TUI: `systemctl --user stop tabletap.service`.
+To retire it, run `systemctl --user disable --now tabletap.service`, then
+`.venv/bin/tabletap service uninstall` and
+`systemctl --user daemon-reload`. The obsolete checked-in
+`tabletap.service` template with hardcoded executable and display settings
+has been replaced by this portable installer.
+
 ## Quick start
 
 ```console
@@ -128,6 +152,7 @@ The interactive TUI starts in a safe stopped state. Press `c` for guided calibra
 | `tabletap status` | Show current config |
 | `tabletap devices` | List input microphones and their device indices |
 | `tabletap devices --json` | Machine-readable microphone discovery |
+| `tabletap service install` | Generate an optional headless systemd user unit using the active Python interpreter |
 | `tabletap doctor` | Validate installation, microphone and shortcut tools |
 
 ## Tap patterns

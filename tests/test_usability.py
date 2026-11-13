@@ -192,7 +192,8 @@ def test_cli_version_matches_release(monkeypatch, capsys):
     with pytest.raises(SystemExit) as status:
         main()
     assert status.value.code == 0
-    assert "0.3.0" in capsys.readouterr().out
+    from tabletap import __version__
+    assert __version__ in capsys.readouterr().out
 
 
 def test_new_config_is_private_to_owner(tmp_path):

@@ -12,6 +12,8 @@ import signal
 import sys
 import time
 
+import yaml
+
 from .action import ActionRunner
 from .config import init_config, load_config
 from .filter import AdaptiveThreshold, OnsetDetector
@@ -43,9 +45,13 @@ def run_bridge(config_path=None, category=None, dry_run=False) -> int:
 
     A lock prevents a TUI bridge from racing the old systemd daemon.
     """
-    if config_path is None:
-        init_config()
-    cfg = load_config(config_path)
+    try:
+        if config_path is None:
+            init_config()
+        cfg = load_config(config_path)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        emit("error", message=f"Cannot load TableTap config: {exc}")
+        return 2
     audio = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     detection = cfg.get("detection", {})
@@ -159,10 +165,14 @@ def run_calibration(config_path=None) -> int:
     from .calibrate import calibrate
     from .config import save_calibration
 
-    if config_path is None:
-        init_config()
-    cfg = load_config(config_path)
     output = sys.stdout
+    try:
+        if config_path is None:
+            init_config()
+        cfg = load_config(config_path)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        print(json.dumps({"type": "error", "message": f"Cannot load TableTap config: {exc}"}), file=output, flush=True)
+        return 2
     lock = PIDLock()
     if not lock.acquire():
         print(json.dumps({"type": "error", "message": "Another TableTap listener is running. Stop it before calibration."}),
@@ -193,7 +203,7 @@ def run_calibration(config_path=None) -> int:
         print(json.dumps({"type": "calibration_done", **result}),
               file=output, flush=True)
         return 0
-    except (OSError, ImportError, ValueError) as exc:
+    except (MicDisconnected, OSError, ImportError, ValueError) as exc:
         print(json.dumps({"type": "error", "message": str(exc)}),
               file=output, flush=True)
         return 1

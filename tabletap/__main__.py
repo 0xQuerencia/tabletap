@@ -43,6 +43,7 @@ def monitor_cmd(cfg: dict):
     if saved_noise is not None and saved_peak is not None:
         threshold.set_from_calibration(saved_noise, saved_peak)
 
+    sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
     sos = None
     if filter_cfg.get("enabled", True):
         sos = make_bandpass(
@@ -51,7 +52,7 @@ def monitor_cmd(cfg: dict):
             audio_cfg.get("sample_rate", 44100),
         )
 
-    print(f"[tabletap monitor] Threshold: {threshold.threshold_db:.1f} dB")
+    print(f"[tabletap monitor] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB")
     print("[tabletap monitor] Watching mic levels... (Ctrl+C to stop)\n")
 
     try:
@@ -59,7 +60,7 @@ def monitor_cmd(cfg: dict):
             while True:
                 raw, filtered = mic.read_filtered()
                 db = rms_db(filtered)
-                spike = " <-- SPIKE!" if db > threshold.threshold_db else ""
+                spike = " <-- SPIKE!" if db > threshold.threshold_db + sensitivity_offset else ""
 
                 bar_db = max(0, db + 100)
                 bar_len = int(bar_db / 2)
@@ -82,6 +83,7 @@ def test_cmd(cfg: dict, duration: int):
     audio_cfg = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     detect_cfg = cfg.get("detection", {})
+    sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
 
     threshold = AdaptiveThreshold(
         initial_threshold_db=detect_cfg.get("threshold_db", -30),
@@ -98,10 +100,14 @@ def test_cmd(cfg: dict, duration: int):
         min_gap_ms=detect_cfg.get("min_gap_ms", 150),
         rhythm_window_ms=detect_cfg.get("rhythm_window_ms", 800),
         long_press_ms=detect_cfg.get("long_press_ms", 500),
+        medium_hold_ms=detect_cfg.get("medium_hold_ms", 2000),
+        long_hold_ms=detect_cfg.get("long_hold_ms", 4000),
+        hold_repeat_ms=detect_cfg.get("hold_repeat_ms", 500),
+        enable_hold=detect_cfg.get("enable_hold_gestures", False),
     )
     onset = OnsetDetector(min_gap_ms=detect_cfg.get("min_gap_ms", 80))
 
-    print(f"[tabletap test] Threshold: {threshold.threshold_db:.1f} dB\n")
+    print(f"[tabletap test] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB\n")
 
     start_time = time.time()
     try:
@@ -111,7 +117,7 @@ def test_cmd(cfg: dict, duration: int):
                 db = rms_db(filtered)
                 now = time.monotonic()
 
-                is_spike = threshold.is_above(db)
+                is_spike = bool(float(db) > threshold.threshold_db + sensitivity_offset)
                 # Keep the onset baseline updated during silence too.
                 detected = onset.feed(db, now, active=is_spike)
 
@@ -141,7 +147,7 @@ def test_cmd(cfg: dict, duration: int):
                 
                 elapsed = int(time.time() - start_time)
                 remaining = duration - elapsed
-                print(f"\r  [{remaining:2d}s] {db:6.1f} dB (thr: {threshold.threshold_db:.1f}) |{bar.ljust(50)}|{spike}", end="", flush=True)
+                print(f"\r  [{remaining:2d}s] {db:6.1f} dB (thr: {threshold.threshold_db + sensitivity_offset:.1f}) |{bar.ljust(50)}|{spike}", end="", flush=True)
 
     except KeyboardInterrupt:
         pass
@@ -179,6 +185,8 @@ def main():
     sub.add_parser("status", help="Show current config and device info")
     sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
     sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
+    service_p = sub.add_parser("service", help="Manage optional background systemd user-service integration")
+    service_p.add_argument("service_action", choices=("install", "uninstall", "path"))
     devices_p = sub.add_parser("devices", help="List available microphone input devices")
     devices_p.add_argument("--json", action="store_true", help="Machine-readable microphone list")
     bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
@@ -199,6 +207,23 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "service":
+        from .service import install_user_service, remove_user_service, user_service_path
+        if args.service_action == "path":
+            print(user_service_path())
+        elif args.service_action == "install":
+            path = install_user_service(sys.executable)
+            print(f"[tabletap] Created {path} (uses {sys.executable})")
+            print("Run: systemctl --user daemon-reload")
+            print("Then: systemctl --user enable --now tabletap.service")
+            print("On Hyprland, import your Wayland session variables into systemd first.")
+        else:
+            path = remove_user_service()
+            print(f"[tabletap] Removed {path} (if it existed)")
+            print("If active, stop/disable it first: systemctl --user disable --now tabletap.service")
+            print("Then run: systemctl --user daemon-reload")
+        return
 
     if args.command == "devices":
         from .mic import list_input_devices
