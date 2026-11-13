@@ -118,11 +118,22 @@ class ImpactDetector:
         self._last_accepted_at = float("-inf")
         self._armed = True
         self.rejected_reason = None
+        self._noise_block_until = float("-inf")
 
-    def feed(self, db: float, threshold_db: float, now: float) -> bool:
+    def feed(self, db: float, threshold_db: float, now: float,
+             broadband: bool = False) -> bool:
         self.rejected_reason = None
         rise = 0.0 if self._previous_db is None else db - self._previous_db
         self._previous_db = db
+        if broadband:
+            if now >= self._noise_block_until:
+                self.rejected_reason = "broadband noise / possible speech"
+            self._noise_block_until = now + 0.4
+            self._pending_since = None
+            self._armed = False
+            return False
+        if now < self._noise_block_until:
+            return False
         active = db > threshold_db
         if self._pending_since is not None:
             if active:
@@ -151,3 +162,22 @@ class ImpactDetector:
             else:
                 self.rejected_reason = "slow onset"
         return False
+
+
+
+def is_broadband_noise(raw: np.ndarray, sample_rate: int) -> bool:
+    """Reject high-frequency-rich acoustic bursts, unlike low desk thumps.
+
+    shortcut: This is a conservative spectral veto, not a trained speech
+    classifier; verify on real recordings if soft speech remains troublesome.
+    """
+    samples = np.asarray(raw, dtype=np.float64)
+    if samples.ndim == 2:
+        samples = samples.mean(axis=1)
+    if samples.size < 128:
+        return False
+    power = np.abs(np.fft.rfft(samples * np.hanning(samples.size))) ** 2
+    frequencies = np.fft.rfftfreq(samples.size, 1 / sample_rate)
+    low = power[(frequencies >= 80) & (frequencies <= 800)].sum()
+    high = power[(frequencies >= 1200) & (frequencies <= 4500)].sum()
+    return bool(low > 0 and high > low * 0.08)

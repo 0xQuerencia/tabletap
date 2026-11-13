@@ -6,7 +6,7 @@ import subprocess
 import shutil
 
 from .mic import MicCapture, rms_db, MicDisconnected
-from .filter import AdaptiveThreshold, ImpactDetector
+from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
 from .pattern import PatternDetector
 from .action import ActionRunner
 from .calibrate import auto_calibrate
@@ -119,9 +119,16 @@ class Daemon:
                     is_spike = bool(float(db) > self.threshold.threshold_db + self.sensitivity_offset)
                     # Feed the onset detector for quiet frames too, otherwise
                     # its baseline stays stale and isolated taps are missed.
-                    confirmed = self.impact.feed(
-                        db, self.threshold.threshold_db + self.sensitivity_offset, now,
+                    limit = self.threshold.threshold_db + self.sensitivity_offset
+                    broadband = bool(
+                        self.detect_cfg.get("broadband_guard", True)
+                        and db > limit - 12.0
+                        and rms_db(raw) > self.threshold.noise_floor_db + 14.0
+                        and is_broadband_noise(raw, self.audio_cfg.get("sample_rate", 44100))
                     )
+                    if broadband:
+                        self.pattern_detector.reset()
+                    confirmed = self.impact.feed(db, limit, now, broadband=broadband)
                     if confirmed:
                         self.pattern_detector.feed()
                     if not is_spike:

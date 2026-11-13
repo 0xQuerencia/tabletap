@@ -73,7 +73,7 @@ def stream_audio(samples, capsys):
 def test_real_waveform_triple_tap(capsys):
     result = stream_audio(synthesize([0.2, 0.47, 0.73]), capsys)
     events = [v for v in result if v["type"] == "gesture"]
-    assert [event["pattern"] for event in events] == ["triple"], events
+    assert [event["pattern"] for event in events] == ["triple"], result
 
 
 def test_real_waveform_background_noise_only(capsys):
@@ -84,13 +84,13 @@ def test_real_waveform_background_noise_only(capsys):
 def test_real_waveform_double_tap(capsys):
     result = stream_audio(synthesize([0.2, 0.52]), capsys)
     events = [v for v in result if v["type"] == "gesture"]
-    assert [event["pattern"] for event in events] == ["double"], events
+    assert [event["pattern"] for event in events] == ["double"], result
 
 
 def test_real_waveform_four_taps(capsys):
     result = stream_audio(synthesize([0.2, 0.4, 0.6, 0.8]), capsys)
     events = [v for v in result if v["type"] == "gesture"]
-    assert [event["pattern"] for event in events] == ["quadruple"], events
+    assert [event["pattern"] for event in events] == ["quadruple"], result
 
 
 def test_continuous_loud_voice_like_tone_is_not_a_tap(capsys):
@@ -111,3 +111,21 @@ def test_typing_burst_is_not_a_four_tap(capsys):
     data = stream_audio(synthesize([.20, .36, .52, .68, .84, 1.00, 1.16],
                                    seconds=2.8), capsys)
     assert not [event for event in data if event["type"] == "gesture"], data
+
+
+def test_bright_short_speech_bursts_not_misdetected_as_taps(capsys):
+    audio = synthesize([], seconds=2.5).astype(np.float64)
+    # Multiple short voice-like syllables with fundamental and upper harmonics.
+    # A sharp envelope can fool energy-only detectors even when no desk is hit.
+    for at in (0.22, 0.48, 0.75):
+        start = round(at * SAMPLE_RATE)
+        length = round(0.10 * SAMPLE_RATE)
+        t = np.arange(length) / SAMPLE_RATE
+        envelope = np.minimum(1.0, t / .004) * np.minimum(1.0, (.10 - t) / .004)
+        voice = envelope * (
+            7500 * np.sin(2 * np.pi * 190 * t)
+            + 5500 * np.sin(2 * np.pi * 1900 * t)
+        )
+        audio[start:start + length] += voice
+    received = stream_audio(np.clip(audio, -32768, 32767).astype(np.int16), capsys)
+    assert not [v for v in received if v["type"] == "gesture"], received

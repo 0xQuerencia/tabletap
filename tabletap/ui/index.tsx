@@ -490,7 +490,7 @@ function App() {
               ))))
               if (typeof data.db === "number") setLevel(data.db)
               setNotice(phase === "noise" ? "Stay quiet while measuring room noise…" :
-                phase === "work" ? "TYPE AND CLICK NORMALLY NOW." :
+                phase === "work" ? "TYPE, SPEAK AND CLICK NORMALLY NOW." :
                 phase === "tap" ? "TAP YOUR DESK 5–10 TIMES NOW." :
                 "Get ready to tap your desk…")
             } else if (data.type === "calibration_done") {
@@ -677,7 +677,7 @@ function App() {
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>{narrow() ? "v0.6" : "acoustic shortcuts  /  v0.6.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.6" : "acoustic shortcuts  /  v0.6.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -760,10 +760,10 @@ function App() {
       <Show when={page() === 2}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={2}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>CALIBRATE YOUR DESK</text>
-          <text fg={theme.dim}>Three phases: quiet, normal typing/mousing, then desk taps. Esc cancels.</text>
+          <text fg={theme.dim}>Three phases: quiet, normal typing/speaking/clicking, then desk taps. Esc cancels.</text>
           <box width={Math.max(22, Math.min(70, dimensions().width - 8))} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
-            <text fg={theme.text}>02  Work normally   ·  type and click (learn what NOT to trigger)</text>
+            <text fg={theme.text}>02  Work normally   ·  type, speak and click (negative examples)</text>
             <text fg={theme.text}>03  Tap surface     ·  learn deliberate desk knocks</text>
             <text fg={theme.text}>04  Save threshold  ·  require knocks louder than typing</text>
             <text fg={theme.dim}>Saved noise floor: {config().detection?.noise_floor_db ?? "not calibrated"} dB</text>

@@ -66,7 +66,7 @@ def test_cmd(cfg: dict, duration: int):
     import time
     from .mic import MicCapture, rms_db
     from .pattern import PatternDetector
-    from .filter import ImpactDetector
+    from .filter import ImpactDetector, is_broadband_noise
 
     print(f"[tabletap test] Testing tap detection for {duration} seconds...")
     print("[tabletap test] Detected patterns will be printed (no actions executed)\n")
@@ -114,7 +114,16 @@ def test_cmd(cfg: dict, duration: int):
 
                 is_spike = bool(float(db) > threshold.threshold_db + sensitivity_offset)
                 # Keep the onset baseline updated during silence too.
-                confirmed = impact.feed(db, threshold.threshold_db + sensitivity_offset, now)
+                limit = threshold.threshold_db + sensitivity_offset
+                broadband = bool(
+                    detect_cfg.get("broadband_guard", True)
+                    and db > limit - 12.0
+                    and rms_db(raw) > threshold.noise_floor_db + 14.0
+                    and is_broadband_noise(raw, audio_cfg.get("sample_rate", 44100))
+                )
+                if broadband:
+                    pattern_detector.reset()
+                confirmed = impact.feed(db, limit, now, broadband=broadband)
                 if confirmed:
                     pattern_detector.feed()
                 if not is_spike:

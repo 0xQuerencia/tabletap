@@ -16,7 +16,7 @@ import yaml
 
 from .action import ActionRunner
 from .config import init_config, load_config
-from .filter import AdaptiveThreshold, ImpactDetector
+from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
 from .lock import PIDLock
 from .mic import MicCapture, MicDisconnected, rms_db
 from .pattern import PatternDetector
@@ -140,13 +140,22 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 if deadline is not None and time.monotonic() >= deadline:
                     emit("live_expired", message="Live action authorization expired")
                     break
-                _raw, filtered = mic.read_filtered()
+                raw, filtered = mic.read_filtered()
                 db = float(rms_db(filtered))
                 now = time.monotonic()
-                spike = bool(db > threshold.threshold_db + sensitivity_offset)
+                limit = threshold.threshold_db + sensitivity_offset
+                spike = bool(db > limit)
+                broadband = bool(
+                    detection.get("broadband_guard", True)
+                    and db > limit - 12.0
+                    and rms_db(raw) > threshold.noise_floor_db + 14.0
+                    and is_broadband_noise(raw, audio.get("sample_rate", 44100))
+                )
+                if broadband:
+                    pattern.reset()
                 # Feed the energy derivative on *every* chunk. Skipping silence
                 # otherwise leaves the onset detector with stale energy.
-                confirmed = impact.feed(db, threshold.threshold_db + sensitivity_offset, now)
+                confirmed = impact.feed(db, limit, now, broadband=broadband)
                 if confirmed:
                     handle(pattern.feed())
                 if not spike:

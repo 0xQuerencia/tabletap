@@ -135,3 +135,25 @@ def test_calibration_fails_closed_when_typing_is_louder_than_taps():
          patch("tabletap.calibrate.time.sleep"):
         with pytest.raises(ValueError, match="not clearly louder"):
             calibrate({}, duration_sec=1)
+
+
+def test_broadband_noise_gate_separates_bright_voice_and_low_thump():
+    from tabletap.filter import is_broadband_noise
+
+    fs = 44100
+    t = np.arange(1024) / fs
+    thump = 16000 * np.sin(2 * np.pi * 185 * t) * np.exp(-t * 35)
+    speech = 10000 * np.sin(2 * np.pi * 185 * t) + 6000 * np.sin(2 * np.pi * 1800 * t)
+    assert not is_broadband_noise(thump, fs)
+    assert is_broadband_noise(speech, fs)
+
+
+def test_broadband_noise_veto_cancels_pending_impacts_and_holds_off():
+    gate = ImpactDetector()
+    assert not gate.feed(-60, -32, 0.0)
+    assert not gate.feed(-15, -32, 0.2)  # a candidate tap
+    assert not gate.feed(-16, -32, 0.23, broadband=True)
+    assert not gate.feed(-60, -32, 0.27)  # masked as possible voice
+    assert not gate.feed(-60, -32, 0.65)
+    assert not gate.feed(-12, -32, 0.80)
+    assert gate.feed(-60, -32, 0.86)

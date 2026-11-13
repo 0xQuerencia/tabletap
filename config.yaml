@@ -23,6 +23,7 @@ detection:
   medium_hold_ms: 2000    # medium hold - 2s-4s
   long_hold_ms: 4000      # long hold - 4s+
   enable_four_taps: false # explicitly opt in: 4-tap misreads can interrupt work
+  broadband_guard: true   # ignore speech-like, high-frequency-rich sounds
   max_impact_ms: 220      # reject sustained sound instead of classifying it as a tap
   min_attack_db: 7.0      # require sharp onset
   enable_hold_gestures: false  # sustained pressure cannot be reliably inferred from microphone audio
