@@ -34,7 +34,7 @@ def emit(kind: str, **fields) -> None:
     # Worker threads can finish launching actions while the mic emits levels.
     # Serialize a complete JSON line per write for the terminal bridge.
     with _emit_lock:
-        sys.stdout.write(line + "\\n")
+        sys.stdout.write(line + "\n")
         sys.stdout.flush()
 
 
