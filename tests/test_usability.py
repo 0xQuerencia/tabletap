@@ -90,3 +90,32 @@ def test_pid_lock_contender_cannot_truncate_current_owners_pid(tmp_path):
     third = PIDLock(path)
     assert third.acquire() is True
     third.release()
+
+
+def test_failed_mic_open_releases_portaudio():
+    from unittest.mock import MagicMock
+    from tabletap.mic import MicCapture
+
+    pa = MagicMock()
+    pa.open.side_effect = OSError("No input device")
+    with patch("tabletap.mic.pyaudio") as audio:
+        audio.PyAudio.return_value = pa
+        with pytest.raises(OSError, match="No input device"):
+            MicCapture({"sample_rate": 44100}, {"enabled": True})
+    pa.terminate.assert_called_once()
+
+
+def test_close_mic_is_idempotent():
+    from unittest.mock import MagicMock
+    from tabletap.mic import MicCapture
+
+    pa = MagicMock()
+    stream = MagicMock()
+    pa.open.return_value = stream
+    with patch("tabletap.mic.pyaudio") as audio:
+        audio.PyAudio.return_value = pa
+        mic = MicCapture({"sample_rate": 44100}, {"enabled": False})
+    mic.close()
+    mic.close()
+    stream.close.assert_called_once()
+    pa.terminate.assert_called_once()
