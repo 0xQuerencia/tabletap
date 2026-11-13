@@ -65,7 +65,7 @@ def test_daemon_sensitivity_uses_same_offset_and_hold_defaults_as_bridge():
     try:
         assert daemon.sensitivity_offset == 12.0
         assert daemon.pattern_detector.enable_hold is False
-        assert daemon.onset.min_gap == pytest.approx(.18)
+        assert daemon.impact.min_gap == pytest.approx(.18)
     finally:
         daemon.action_runner.shutdown()
 
