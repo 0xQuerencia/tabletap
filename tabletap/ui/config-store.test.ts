@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
-} from "./config-store"
+} from "./config-store.ts"
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "tabletap-config-"))
