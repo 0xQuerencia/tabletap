@@ -55,10 +55,15 @@ class PatternDetector:
         self._hold_start_time: float = 0.0
         self._in_hold: bool = False
         self._last_repeat_time: float = 0.0
+        self._overflow = False
+        self._last_overflow_tap = float('-inf')
 
     def feed(self) -> Optional[TapEvent]:
         now = time.monotonic()
 
+        if self._overflow:
+            self._last_overflow_tap = now
+            return None
         if now - self._last_tap_time < self.min_gap:
             return None
         
@@ -79,6 +84,14 @@ class PatternDetector:
             self._hold_start_time = now
 
         self._tap_count += 1
+        if self._tap_count > 4:
+            # Five or more hits is typical of typing, not a deliberate four-tap.
+            # Discard the entire burst; only re-arm after a quiet interval.
+            self._overflow = True
+            self._last_overflow_tap = now
+            self._in_hold = False
+            self._tap_count = 0
+            return None
         if self._tap_count == 1:
             self._first_tap_time = now
 
@@ -131,7 +144,11 @@ class PatternDetector:
 
     def check_window_timeout(self) -> Optional[TapEvent]:
         now = time.monotonic()
-        
+
+        if self._overflow:
+            if now - self._last_overflow_tap >= 0.45:
+                self.reset()
+            return None
         if self._in_hold:
             hold_duration = now - self._hold_start_time
             if hold_duration > self.hold_timeout:
@@ -147,7 +164,7 @@ class PatternDetector:
         elapsed = now - self._first_tap_time
 
         if elapsed > self.rhythm_window:
-            count = min(self._tap_count, 4)
+            count = self._tap_count
             self._tap_count = 0
 
             if count == 1:
@@ -162,6 +179,8 @@ class PatternDetector:
         return None
 
     def reset(self):
+        self._overflow = False
+        self._last_overflow_tap = float('-inf')
         self._tap_count = 0
         self._in_hold = False
         self._hold_spike_count = 0
