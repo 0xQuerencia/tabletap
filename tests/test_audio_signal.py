@@ -54,7 +54,7 @@ def stream_audio(samples, capsys):
                    "noise_alpha": 0.05, "peak_alpha": 0.1, "snr_gate_db": 6.0},
         "detection": {"min_gap_ms": 150, "rhythm_window_ms": 800,
                       "noise_floor_db": -52.0, "slam_peak_db": -14.0,
-                      "enable_hold_gestures": False},
+                      "enable_four_taps": True, "enable_hold_gestures": False},
         "actions": {
             "single": {"type": "exec", "value": "true"},
             "double": {"type": "exec", "value": "true"},
