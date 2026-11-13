@@ -7,7 +7,7 @@ import { dirname, join } from "node:path"
 import {
   actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
   type Action, type TableConfig,
-} from "./config-store"
+} from "./config-store.ts"
 
 type BridgeMessage =
   | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
