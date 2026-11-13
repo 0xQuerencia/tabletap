@@ -78,3 +78,13 @@ test("invalid YAML refuses edits instead of overwriting", () => {
     expect(readFileSync(path, "utf8")).toBe("actions: [broken")
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+
+test("system default microphone is represented as YAML null", () => {
+  const { dir, path } = fixture()
+  try {
+    const result = updateConfigField(path, ["audio", "device_index"], null)
+    expect(result.audio?.device_index).toBeNull()
+    expect(readFileSync(path, "utf8")).toContain("device_index: null")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
