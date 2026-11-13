@@ -10,7 +10,7 @@ export type Action = { name?: string; type?: "key" | "exec" | "script"; value?: 
 export type TableConfig = {
   // YAML contains both flat gesture actions and numbered profile maps.
   actions: Record<string, Action | Record<string | number, Action>>
-  detection?: Record<string, number>
+  detection?: Record<string, number | boolean>
   filter?: Record<string, number | boolean>
   audio?: Record<string, unknown>
 }
@@ -48,13 +48,13 @@ export function getActionRows(config: TableConfig, profile: string): [string, Ac
       ...FOUR_GESTURES,
       ...(config.detection?.enable_hold_gestures ? HOLD_GESTURES : []),
     ]
-    return order
-      .map((gesture) => [gesture, config.actions[gesture]] as const)
-      .filter((entry): entry is readonly [string, Action] =>
-        entry[1] !== null && typeof entry[1] === "object" &&
-        !("1" in entry[1]),
-      )
-      .map(([gesture, action]) => [gesture, action])
+    return order.reduce<[string, Action][]>((rows, gesture) => {
+      const action = config.actions[gesture]
+      if (action && typeof action === "object" && "value" in action) {
+        rows.push([gesture, action as Action])
+      }
+      return rows
+    }, [])
   }
   const actions = config.actions[profile]
   if (!actions || typeof actions !== "object") return []
