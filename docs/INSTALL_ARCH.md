@@ -60,20 +60,19 @@ When the demo looks correct, run `.venv/bin/tabletap`. Press `c` to calibrate.
 TUI shows **TAP YOUR DESK**. Calibration saves local acoustic thresholds
 in `~/.config/tabletap/config.yaml`.
 
-On the Home screen, use `v` to enable preview mode (listen without
-performing actions), then press `Space` to start. Verify each tap
-sequence before enabling live actions. You can switch profiles with
+On the Home screen, press `Space` to listen in **preview-only mode** (no commands executed). Verify each tap sequence, then press `v` when you explicitly want to arm live actions. You can switch profiles with
 `p`, inspect activity with `5`, and quit with `q`.
 
 ## 3. Verify the microphone
 
 ```bash
 tabletap doctor
+tabletap devices  # list microphones and device indices
 tabletap monitor
 tabletap test -d 20
 ```
 
-The last command prints detected patterns without executing actions.
+The last command prints detected patterns without executing actions. On TUI Settings (press `4`), press `m` to switch microphone sources and `+`/`-` to tune sensitivity. Calibration and action changes make a `config.yaml.bak` backup without deleting YAML comments.
 Firm taps on a hard desk generally work better than light taps on a
 thick desk mat.
 
