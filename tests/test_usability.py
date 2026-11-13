@@ -182,3 +182,14 @@ def test_devices_cli_returns_parseable_json(monkeypatch, capsys):
     ]):
         main()
     assert json.loads(capsys.readouterr().out)["devices"][0]["index"] == 4
+
+
+def test_cli_version_matches_release(monkeypatch, capsys):
+    import sys
+    from tabletap.__main__ import main
+
+    monkeypatch.setattr(sys, "argv", ["tabletap", "--version"])
+    with pytest.raises(SystemExit) as status:
+        main()
+    assert status.value.code == 0
+    assert "0.3.0" in capsys.readouterr().out
