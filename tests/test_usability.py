@@ -147,3 +147,38 @@ detection:
     assert "firefox" in changed and "spotify" not in changed
     assert path.with_suffix(".yaml.bak").read_text() == original
     assert "threshold_db: -36.0" in changed
+
+
+def test_microphone_enumeration_only_returns_input_devices():
+    from unittest.mock import MagicMock
+    from tabletap.mic import list_input_devices
+
+    pa = MagicMock()
+    pa.get_device_count.return_value = 3
+    pa.get_default_input_device_info.return_value = {"index": 2}
+    pa.get_device_info_by_index.side_effect = [
+        {"name": "Output only", "maxInputChannels": 0},
+        {"name": "Built-in Mic", "maxInputChannels": 1, "defaultSampleRate": 44100},
+        {"name": "USB Mic", "maxInputChannels": 2, "defaultSampleRate": 48000},
+    ]
+    with patch("tabletap.mic.pyaudio") as lib:
+        lib.PyAudio.return_value = pa
+        devices = list_input_devices()
+    assert [dev["index"] for dev in devices] == [1, 2]
+    assert devices[0]["default"] is False
+    assert devices[1]["default"] is True
+    assert devices[1]["sample_rate"] == 48000
+    pa.terminate.assert_called_once()
+
+
+def test_devices_cli_returns_parseable_json(monkeypatch, capsys):
+    import json
+    import sys
+    from tabletap.__main__ import main
+
+    monkeypatch.setattr(sys, "argv", ["tabletap", "devices", "--json"])
+    with patch("tabletap.mic.list_input_devices", return_value=[
+        {"index": 4, "name": "Test Mic", "default": True, "channels": 1, "sample_rate": 44100},
+    ]):
+        main()
+    assert json.loads(capsys.readouterr().out)["devices"][0]["index"] == 4
