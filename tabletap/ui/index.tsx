@@ -222,22 +222,28 @@ function App() {
     setNotice("Profile: " + next)
     if (isListening()) await startBridge()
   }
+  function saveField(path: (string | number)[], value: string | number | boolean, label: string) {
+    try {
+      const updated = updateConfigField(CONFIG, path, value, IS_DEMO)
+      setConfig(updated)
+      setNotice("Saved " + label + " · original backed up as config.yaml.bak")
+      addLog("Updated " + label)
+      if (isListening()) void startBridge()
+      return true
+    } catch (error) {
+      setNotice("Not saved: " + String(error))
+      addLog("Config error: " + String(error))
+      return false
+    }
+  }
   function updateActionValue() {
     const row = rows()[selected()]
     if (!row) return
-    const [key] = row
-    const next = structuredClone(config())
-    if (profile() === "default") {
-      const defaultActions = next.actions as unknown as Record<string, Action>
-      defaultActions[key] = { ...defaultActions[key], value: editText() }
-    } else {
-      next.actions[profile()][key] = { ...next.actions[profile()][key], value: editText() }
+    if (saveField(actionFieldPath(profile(), row[0], "value"), editText(),
+                  profile() + "/" + row[0])) {
+      editInput?.blur()
+      setEditing(false)
     }
-    saveConfig(next)
-    setConfig(next)
-    setEditing(false)
-    addLog("Updated " + profile() + "/" + key)
-    if (isListening()) void startBridge()
   }
   function changeActionType() {
     const row = rows()[selected()]
@@ -245,18 +251,13 @@ function App() {
     const [key, action] = row
     const options: Action["type"][] = ["exec", "key", "script"]
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
-    const next = structuredClone(config())
-    if (profile() === "default") {
-      const defaultActions = next.actions as unknown as Record<string, Action>
-      defaultActions[key] = { ...action, type: nextType }
-    }
-    else next.actions[profile()][key] = { ...action, type: nextType }
-    saveConfig(next)
-    setConfig(next)
-    addLog("Action type → " + nextType)
-    if (isListening()) void startBridge()
+    saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
   }
   function editAction() {
+    if (IS_DEMO) {
+      setNotice("Demo is read-only. Run tabletap without --demo to edit actions.")
+      return
+    }
     const row = rows()[selected()]
     if (!row) return
     setEditText(row[1]?.value || "")
@@ -264,14 +265,9 @@ function App() {
     queueMicrotask(() => editInput?.focus())
   }
   function adjustThreshold(increase: number) {
-    const next = structuredClone(config())
-    next.filter ||= {}
-    const old = Number(next.filter.sensitivity_offset_db || 0)
-    next.filter.sensitivity_offset_db = Math.max(-30, Math.min(30, old + increase))
-    saveConfig(next)
-    setConfig(next)
-    setNotice("Sensitivity offset: " + next.filter.sensitivity_offset_db + " dB")
-    if (isListening()) void startBridge()
+    const old = Number(config().filter?.sensitivity_offset_db || 0)
+    const next = Math.max(-30, Math.min(30, old + increase))
+    saveField(["filter", "sensitivity_offset_db"], next, "sensitivity (" + next + " dB)")
   }
   async function calibrate() {
     if (IS_DEMO) {
@@ -281,6 +277,7 @@ function App() {
     if (calibrating()) return
     await stopBridge()
     setCalibrating(true)
+    calibrationCancelled = false
     setCalPhase("noise")
     setCalProgress(0)
     setState("CALIBRATING")
@@ -339,8 +336,9 @@ function App() {
       await consumed
       calibration = null
       if (result !== 0) {
-        setCalPhase("failed")
-        setNotice("Calibration failed: " + (errorMessage || "microphone unavailable"))
+        setCalPhase(calibrationCancelled ? "cancelled" : "failed")
+        setNotice(calibrationCancelled ? "Calibration cancelled. Old settings preserved." :
+                  "Calibration failed: " + (errorMessage || "microphone unavailable"))
       }
     } catch (error) {
       setCalPhase("failed")
@@ -380,6 +378,18 @@ function App() {
   }
 
   useKeyboard((key) => {
+    if (calibrating() && key.name === "escape") {
+      calibrationCancelled = true
+      calibration?.kill("SIGTERM")
+      setNotice("Cancelling calibration…")
+      key.preventDefault()
+      return
+    }
+    if (calibrating() && key.name !== "q" && !(key.ctrl && key.name === "c")) {
+      // Prevent accidentally starting another mic listener mid-calibration.
+      key.preventDefault()
+      return
+    }
     if (editing()) {
       if (key.name === "escape") {
         setEditing(false)
@@ -525,7 +535,7 @@ function App() {
             <box backgroundColor={selected() === i() ? theme.active : "transparent"} paddingLeft={1} paddingY={0}>
               <text fg={selected() === i() ? theme.accent : theme.text}>
                 {selected() === i() ? "› " : "  "}
-                {pattern.padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
+                {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
               </text>
             </box>
           }</For>
@@ -541,7 +551,7 @@ function App() {
       <Show when={page() === 2}>
         <box flexGrow={1} justifyContent="center" alignItems="center" gap={2}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>CALIBRATE YOUR DESK</text>
-          <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times.</text>
+          <text fg={theme.dim}>Two phases: listen to ambient noise, then tap 5–10 times. Esc cancels.</text>
           <box width={Math.min(70, dimensions().width - 8)} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
             <text fg={theme.text}>02  Tap surface     ·  learn impact intensity</text>
@@ -552,7 +562,7 @@ function App() {
             <text fg={theme.accent}>Phase: {calPhase().toUpperCase()}  {calProgress()}%</text>
             <text fg={theme.good}>{"━".repeat(Math.round(calProgress() / 5))}<span style={{ fg: theme.border }}>{"┄".repeat(20 - Math.round(calProgress() / 5))}</span></text>
           </box>
-          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? "● Calibration in progress… tap when instructed" : "Press c to begin calibration"}</text>
+          <text fg={calibrating() ? theme.amber : theme.good}>{calibrating() ? (calPhase() === "tap" ? "● TAP YOUR DESK NOW — Esc to cancel" : "● Stay quiet until instructed — Esc to cancel") : "Press c to begin calibration"}</text>
         </box>
       </Show>
       <Show when={page() === 3}>
