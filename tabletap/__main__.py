@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import __version__
 from .config import load_config, init_config, save_calibration
 from .daemon import Daemon
 from .calibrate import calibrate
@@ -153,6 +154,7 @@ def main():
         prog="tabletap",
         description="Turn your table into a button pad using the laptop mic",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     start_p = sub.add_parser("start", help="Start the tabletap daemon")
