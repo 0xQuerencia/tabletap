@@ -119,3 +119,31 @@ def test_close_mic_is_idempotent():
     mic.close()
     stream.close.assert_called_once()
     pa.terminate.assert_called_once()
+
+
+def test_calibration_preserves_config_comments_and_external_edits(tmp_path):
+    from tabletap.config import save_calibration
+
+    path = tmp_path / "config.yaml"
+    original = """# user comments matter
+audio:
+  sample_rate: 44100 # user preferred mic
+actions:
+  single:
+    type: exec
+    value: firefox # user choice
+detection:
+  threshold_db: -30.0 # previous value
+"""
+    path.write_text(original)
+    stale_cfg = {"audio": {"sample_rate": 48000}, "actions": {"single": {"value": "spotify"}}}
+    save_calibration(stale_cfg, {
+        "noise_floor_db": -46.0, "slam_peak_db": -19.0, "threshold_db": -36.0,
+    }, path)
+    changed = path.read_text()
+    assert "# user comments matter" in changed
+    assert "# user preferred mic" in changed
+    assert "# user choice" in changed
+    assert "firefox" in changed and "spotify" not in changed
+    assert path.with_suffix(".yaml.bak").read_text() == original
+    assert "threshold_db: -36.0" in changed
