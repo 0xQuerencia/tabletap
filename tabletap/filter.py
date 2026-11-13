@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import butter, sosfilt, sosfiltfilt, sosfilt_zi
+from scipy.signal import butter, sosfilt, sosfilt_zi
 
 
 def make_bandpass(low: float, high: float, fs: int, order: int = 4):
@@ -9,16 +9,6 @@ def make_bandpass(low: float, high: float, fs: int, order: int = 4):
     low_n = max(low_n, 0.001)
     high_n = min(high_n, 0.999)
     return butter(order, [low_n, high_n], btype="band", output="sos")
-
-
-def apply_bandpass(chunk: np.ndarray, sos, prev_tail: np.ndarray = None):
-    if chunk.ndim > 1:
-        filtered = np.zeros_like(chunk, dtype=np.float64)
-        for ch in range(chunk.shape[1]):
-            filtered[:, ch] = sosfilt(sos, chunk[:, ch].astype(np.float64))
-        return filtered
-    else:
-        return sosfilt(sos, chunk.astype(np.float64))
 
 
 class StatefulBandpass:
@@ -109,36 +99,6 @@ class AdaptiveThreshold:
             "peak_db": round(self.peak_db, 1),
             "threshold_db": round(self.threshold_db, 1),
         }
-
-
-class OnsetDetector:
-    def __init__(self, min_gap_ms: int = 80):
-        self.min_gap = min_gap_ms / 1000.0
-        self._prev_energy = 0.0
-        self._prev_deriv = 0.0
-        self._last_onset_time = 0.0
-
-    def feed(self, energy_db: float, now: float, active: bool = True) -> bool:
-        delta = energy_db - self._prev_energy
-        self._prev_energy = energy_db
-
-        deriv_delta = delta - self._prev_deriv
-        self._prev_deriv = delta
-
-        # Quiet fluctuations update the derivative baseline but must never
-        # consume the tap refractory window before a genuine impact.
-        if not active:
-            return False
-
-        if (now - self._last_onset_time) < self.min_gap:
-            return False
-
-        if delta > 2.0 and deriv_delta > 0.5:
-            self._last_onset_time = now
-            return True
-
-        return False
-
 
 
 class ImpactDetector:
