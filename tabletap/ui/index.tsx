@@ -9,6 +9,14 @@ import {
   type Action, type TableConfig,
 } from "./config-store.ts"
 
+type MicDevice = {
+  index: number
+  name: string
+  default: boolean
+  channels: number
+  sample_rate: number
+}
+
 type BridgeMessage =
   | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
   | { type: "level"; db: number; threshold_db: number; spike: boolean }
@@ -93,6 +101,7 @@ function App() {
   const [commandText, setCommandText] = createSignal("")
   const [help, setHelp] = createSignal(false)
   const [calibrating, setCalibrating] = createSignal(false)
+  const [micDevices, setMicDevices] = createSignal<MicDevice[]>([])
   const [calPhase, setCalPhase] = createSignal("ready")
   const [calProgress, setCalProgress] = createSignal(0)
   let editInput: InputRenderable | null = null
@@ -239,7 +248,7 @@ function App() {
     setNotice("Profile: " + next)
     if (isListening()) await startBridge()
   }
-  function saveField(path: (string | number)[], value: string | number | boolean, label: string) {
+  function saveField(path: (string | number)[], value: string | number | boolean | null, label: string) {
     try {
       const updated = updateConfigField(CONFIG, path, value, IS_DEMO)
       setConfig(updated)
@@ -280,6 +289,37 @@ function App() {
     setEditText(row[1]?.value || "")
     setEditing(true)
     queueMicrotask(() => editInput?.focus())
+  }
+  async function refreshDevices() {
+    try {
+      const proc = Bun.spawn([PYTHON, "-m", "tabletap", "devices", "--json"], {
+        stdout: "pipe", stderr: "ignore", stdin: "ignore",
+      })
+      const body = proc.stdout && typeof proc.stdout !== "number"
+        ? await new Response(proc.stdout).text()
+        : ""
+      const status = await proc.exited
+      if (status === 0) {
+        const parsed: { devices?: MicDevice[] } = JSON.parse(body)
+        setMicDevices(Array.isArray(parsed.devices) ? parsed.devices : [])
+      }
+    } catch {
+      // Doctor provides detailed errors. The dashboard stays usable.
+    }
+  }
+  function cycleMicrophone() {
+    const devices = micDevices()
+    if (devices.length === 0) {
+      setNotice("No microphones discovered · run tabletap doctor")
+      return
+    }
+    const choices: (number | null)[] = [null, ...devices.map((d) => d.index)]
+    const current = config().audio?.device_index
+    const choice = typeof current === "number" ? current : null
+    const next = choices[(choices.indexOf(choice) + 1) % choices.length] ?? null
+    const name = next === null ? "system default" :
+      (devices.find((device) => device.index === next)?.name || "microphone " + next)
+    saveField(["audio", "device_index"], next, "microphone: " + name)
   }
   function adjustThreshold(increase: number) {
     const old = Number(config().filter?.sensitivity_offset_db || 0)
@@ -460,6 +500,7 @@ function App() {
     } else if (page() === 3) {
       if (key.name === "+" || key.name === "=") adjustThreshold(2)
       if (key.name === "-") adjustThreshold(-2)
+      if (key.name === "m") cycleMicrophone()
     }
   })
 
@@ -473,6 +514,7 @@ function App() {
       return
     }
     setConfig(current)
+    void refreshDevices()
     if (!getProfiles(current).includes(profile())) setProfile("default")
     if (IS_DEMO) {
       setState("DEMO")
@@ -519,7 +561,7 @@ function App() {
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
           <text fg={theme.text}>1–5 pages  ·  tab next  ·  space start/stop  ·  p profile  ·  v preview</text>
           <text fg={theme.text}>c calibrate  ·  / commands  ·  j/k select action  ·  enter edit  ·  t action type</text>
-          <text fg={theme.text}>+/- threshold on Settings  ·  ? help  ·  q quit</text>
+          <text fg={theme.text}>m microphone on Settings  ·  +/- sensitivity  ·  ? help  ·  q quit</text>
         </box>
       </Show>
       <Show when={page() === 0}>
@@ -605,7 +647,13 @@ function App() {
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>SETTINGS</text>
           <text fg={theme.dim}>Stored in {CONFIG}</text>
           <box backgroundColor={theme.pane} padding={2} gap={1}>
-            <text fg={theme.text}>Microphone     {String(config().audio?.device_index ?? "system default")}</text>
+            <text fg={theme.text}>Microphone     {truncate(
+              micDevices().find((dev) => dev.index === config().audio?.device_index)?.name ||
+                (config().audio?.device_index === null || config().audio?.device_index === undefined
+                  ? "System default" : "Device " + config().audio?.device_index),
+              Math.max(12, dimensions().width - 22),
+            )}</text>
+            <text fg={theme.dim}>Press m to cycle microphone inputs ({micDevices().length} detected)</text>
             <text fg={theme.text}>Sampling rate  {String(config().audio?.sample_rate ?? 44100)} Hz</text>
             <text fg={theme.text}>Bandpass       {String(config().filter?.low ?? 50)} – {String(config().filter?.high ?? 800)} Hz</text>
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
