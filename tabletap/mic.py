@@ -7,7 +7,7 @@ try:
 except ImportError:
     pyaudio = None
 
-from .filter import make_bandpass, apply_bandpass, StatefulBandpass
+from .filter import make_bandpass, StatefulBandpass
 
 log = logging.getLogger("tabletap")
 

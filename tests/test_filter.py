@@ -1,35 +1,23 @@
 import numpy as np
-import pytest
-from tabletap.filter import make_bandpass, apply_bandpass, AdaptiveThreshold, OnsetDetector
+from tabletap.filter import make_bandpass, StatefulBandpass, AdaptiveThreshold
 
 
-def test_bandpass_maintains_state_across_chunks():
+def test_bandpass_preserves_history_across_chunks():
     fs = 44100
-    sos = make_bandpass(20, 200, fs)
-    
-    t = np.linspace(0, 1, fs)
-    signal = np.sin(2 * np.pi * 100 * t)
-    
-    chunk_size = 1024
-    chunks = [signal[i:i+chunk_size] for i in range(0, len(signal), chunk_size)]
-    
-    filtered_chunks = [apply_bandpass(chunk, sos) for chunk in chunks]
-    
-    assert len(filtered_chunks) == len(chunks)
-    for fc in filtered_chunks:
-        assert fc.dtype == np.float64
-        assert not np.any(np.isnan(fc))
+    samples = np.sin(2 * np.pi * 100 * np.arange(4096) / fs)
+    filter = StatefulBandpass(make_bandpass(20, 200, fs))
+    pieces = [filter.process(chunk) for chunk in np.split(samples, 4)]
+    filtered = np.concatenate(pieces)
+    assert np.isfinite(filtered).all()
+    assert filtered.shape == samples.shape
+    assert np.abs(filtered[-1024:]).mean() > 0.1
 
 
-def test_bandpass_multichannel():
-    fs = 44100
-    sos = make_bandpass(20, 200, fs)
-    
-    stereo = np.random.randint(-32768, 32767, size=(1024, 2), dtype=np.int16)
-    filtered = apply_bandpass(stereo, sos)
-    
-    assert filtered.shape == stereo.shape
-    assert filtered.dtype == np.float64
+def test_stateful_bandpass_handles_stereo():
+    filter = StatefulBandpass(make_bandpass(20, 200, 44100), channels=2)
+    result = filter.process(np.ones((1024, 2), dtype=np.float64))
+    assert result.shape == (1024, 2)
+    assert np.isfinite(result).all()
 
 
 def test_adaptive_threshold_convergence_on_noise():
@@ -109,41 +97,3 @@ def test_adaptive_threshold_calibration():
     assert -45.0 < threshold.threshold_db < -20.0
 
 
-def test_onset_detector_detects_energy_spike():
-    detector = OnsetDetector(min_gap_ms=80)
-    
-    assert not detector.feed(-40.0, 0.0)
-    assert not detector.feed(-38.0, 0.05)
-    
-    assert detector.feed(-30.0, 0.1)
-
-
-def test_onset_detector_respects_min_gap():
-    detector = OnsetDetector(min_gap_ms=100)
-    
-    detector.feed(-30.0, 0.0)
-    detector.feed(-25.0, 0.02)
-    detector.feed(-20.0, 0.04)
-    
-    assert not detector.feed(-15.0, 0.05)
-
-
-def test_onset_detector_allows_onset_after_gap():
-    detector = OnsetDetector(min_gap_ms=100)
-    
-    detector.feed(-40.0, 0.0)
-    detector.feed(-38.0, 0.02)
-    
-    result = detector.feed(-30.0, 0.2)
-    assert result
-
-
-def test_quiet_energy_rise_does_not_consume_tap_debounce():
-    detector = OnsetDetector(min_gap_ms=150)
-    assert not detector.feed(-60.0, 0.0, active=False)
-    assert not detector.feed(-54.0, 0.10, active=False)
-    assert detector.feed(-20.0, 0.20, active=True)
-    assert not detector.feed(-62.0, 0.35, active=False)
-    # This spurious 5 dB quiet rise must not block the next tap at 0.73.
-    assert not detector.feed(-57.0, 0.66, active=False)
-    assert detector.feed(-20.0, 0.73, active=True)

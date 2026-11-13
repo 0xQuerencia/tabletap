@@ -30,7 +30,6 @@ def _prepare_ui():
 def monitor_cmd(cfg: dict):
     import time
     from .mic import MicCapture, rms_db
-    from .filter import make_bandpass, apply_bandpass
 
     audio_cfg = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
@@ -44,14 +43,6 @@ def monitor_cmd(cfg: dict):
         threshold.set_from_calibration(saved_noise, saved_peak, cfg.get('detection', {}).get('threshold_db'))
 
     sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
-    sos = None
-    if filter_cfg.get("enabled", True):
-        sos = make_bandpass(
-            filter_cfg.get("low", 20),
-            filter_cfg.get("high", 200),
-            audio_cfg.get("sample_rate", 44100),
-        )
-
     print(f"[tabletap monitor] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB")
     print("[tabletap monitor] Watching mic levels... (Ctrl+C to stop)\n")
 
