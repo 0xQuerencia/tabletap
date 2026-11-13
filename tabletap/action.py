@@ -2,6 +2,7 @@ import os
 import subprocess
 import shlex
 import shutil
+import logging
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +18,8 @@ def _detect_display_server() -> str:
     elif os.environ.get("DISPLAY"):
         return "x11"
     return "unknown"
+
+log = logging.getLogger(__name__)
 
 KEY_MAP = {
     "enter": "Return",
@@ -51,9 +54,10 @@ KEY_MAP = {
 
 
 class ActionRunner:
-    def __init__(self, actions_cfg: dict[str, Any], category: str = None):
+    def __init__(self, actions_cfg: dict[str, Any], category: str = None, on_result=None):
         self.actions = actions_cfg
         self.category = category
+        self.on_result = on_result
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="action")
         self.display_server = _detect_display_server()
         
@@ -66,14 +70,28 @@ class ActionRunner:
                         self._category_map[int(num)] = action
 
     def run(self, key: str):
-        self._executor.submit(self._execute, key)
-    
+        action = self._get_action(key)
+        if not isinstance(action, dict) or not str(action.get("value", "")).strip():
+            return None
+        future = self._executor.submit(self._execute_action, action)
+        if self.on_result is not None:
+            def report(completed):
+                try:
+                    completed.result()
+                except Exception as exc:
+                    log.error("Action %s failed: %s", key, exc)
+                    self.on_result(key, "failed", str(exc))
+                else:
+                    # Successful spawn/keypress, not proof that a child process
+                    # subsequently exited with zero status.
+                    self.on_result(key, "launched", "")
+            future.add_done_callback(report)
+        return future
+
     def _execute(self, key: str):
         action = self._get_action(key)
-        if action is None:
-            return
-        
-        self._execute_action(action)
+        if action is not None:
+            return self._execute_action(action)
     
     def run_category(self, category: str, number: int):
         action = self.get_action(category, number)
@@ -94,7 +112,7 @@ class ActionRunner:
         return action
     
     def _get_action(self, key: str) -> dict[str, Any] | None:
-        if self.category and self._category_map:
+        if self.category is not None:
             number_map = {
                 "single": 1,
                 "double": 2,
@@ -124,6 +142,8 @@ class ActionRunner:
             self._launch(value)
         elif action_type == "script":
             self._run_script(value)
+        else:
+            raise ValueError(f"Unsupported action type: {action_type}")
 
     def _press_key(self, combo: str):
         parts = combo.lower().split("+")
@@ -149,7 +169,7 @@ class ActionRunner:
             if pynput:
                 self._pynput_press(combo)
             else:
-                print(f"[tabletap] Unknown display server, cannot press: {combo}")
+                raise RuntimeError(f"Unknown display server, cannot press: {combo}")
 
     def _press_key_x11(self, keys: list[str]):
         cmd = ["xdotool", "key", "+".join(keys)]
@@ -164,7 +184,7 @@ class ActionRunner:
                 combo = "+".join(keys)
                 self._pynput_press(combo)
             else:
-                print(f"[tabletap] xdotool not found, cannot press: {'+'.join(keys)}")
+                raise RuntimeError(f"xdotool missing; cannot press: {'+'.join(keys)}")
 
     def _convert_to_wtype_format(self, keys: list[str]) -> list[str]:
         # Wayland virtual-keyboard backend: unlike ydotool, wtype usually
@@ -200,7 +220,7 @@ class ActionRunner:
                 )
                 return
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
-                print(f"[tabletap] wtype key failed, trying fallback: {exc}")
+                log.warning("wtype shortcut failed, trying fallback: %s", exc)
         # Use Linux evdev keycodes for real chord events. The previous
         # wlrctl 'keyboard type' invocation typed text such as 'alt+tab'
         # rather than pressing the corresponding shortcut.
@@ -216,7 +236,7 @@ class ActionRunner:
                 )
                 return
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
-                print(f"[tabletap] ydotool key failed: {exc}")
+                log.warning("ydotool shortcut failed: %s", exc)
 
         # A bare printable key can also be typed by wlrctl. This is
         # deliberately not used for shortcuts or modifier combinations.
@@ -236,8 +256,8 @@ class ActionRunner:
         if pynput:
             self._pynput_press("+".join(keys))
         else:
-            print("[tabletap] Wayland keyboard chords require ydotool + ydotoold; "
-                  f"cannot press: {'+'.join(keys)}")
+            raise RuntimeError("Wayland keyboard shortcuts require wtype or ydotool+ydotoold; "
+                               f"cannot press: {'+'.join(keys)}")
 
     def _convert_to_ydotool_format(self, keys: list[str]) -> list[str]:
         # Linux input-event keycodes; all modifiers stay down until after
@@ -292,7 +312,7 @@ class ActionRunner:
             for k in reversed(keys):
                 kb.release(k)
         except Exception as e:
-            print(f"[tabletap] pynput error: {e}")
+            raise RuntimeError(f"pynput shortcut failed: {e}") from e
 
     def _launch(self, app: str):
         try:
@@ -302,7 +322,7 @@ class ActionRunner:
                 stderr=subprocess.DEVNULL,
             )
         except Exception as e:
-            print(f"[tabletap] launch error: {e}")
+            raise RuntimeError(f"Command launch failed: {e}") from e
 
     def _run_script(self, script: str):
         try:
@@ -318,7 +338,7 @@ class ActionRunner:
                 stderr=subprocess.DEVNULL,
             )
         except Exception as e:
-            print(f"[tabletap] script error: {e}")
+            raise RuntimeError(f"Script launch failed: {e}") from e
     
     def shutdown(self):
         self._executor.shutdown(wait=True, cancel_futures=False)
