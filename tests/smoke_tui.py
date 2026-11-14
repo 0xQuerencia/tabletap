@@ -44,19 +44,23 @@ def main():
         # OpenTUI renders continually. Drain the PTY during interactions so
         # its terminal output cannot fill the buffer and block key handling.
         def drain(duration):
+            nonlocal output
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
                 available, _, _ = select.select([master], [], [], 0.04)
                 if available:
                     try:
-                        os.read(master, 65536)
+                        output = (output + os.read(master, 65536))[-16384:]
                     except OSError:
                         break
 
         for key in (b"2", b"j", b"?", b"?", b"5", b"1"):
             os.write(master, key)
             drain(0.16)
-            assert proc.poll() is None, f"OpenTUI crashed after key {key!r}"
+            assert proc.poll() is None, (
+                f"OpenTUI crashed after key {key!r}: rc={proc.returncode}, "
+                f"tail={output[-3000:]!r}"
+            )
         os.write(master, b"q")
         deadline = time.monotonic() + 10
         while proc.poll() is None and time.monotonic() < deadline:

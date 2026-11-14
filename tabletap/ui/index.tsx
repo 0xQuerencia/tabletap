@@ -9,6 +9,8 @@ import {
   type Action, type TableConfig,
 } from "./config-store.ts"
 import { SAFE_ARM, requestArm, confirmArm, expireArm, type ArmState } from "./safety.ts"
+import { PALETTES, PALETTE_NAMES, isPaletteName, nextPalette, type Palette, type PaletteName } from "./themes.ts"
+import { suggestCommands, isKnownCommand } from "./commands.ts"
 
 type MicDevice = {
   index: number
@@ -28,18 +30,11 @@ type BridgeMessage =
   | { type: "rejected"; reason: string }
   | { type: "live_expired"; message: string }
 
-const theme = {
-  bg: "#1d1c2b",
-  pane: "#14131e",
-  active: "#302e46",
-  text: "#cdd0e9",
-  dim: "#8d8fa9",
-  border: "#3c3a53",
-  accent: "#b8bafb",
-  good: "#a9e9c3",
-  amber: "#f1c482",
-  pink: "#f2a7c3",
-}
+const [activeTheme, setActiveTheme] = createSignal<PaletteName>("midnight")
+// Palette getters stay reactive in Solid JSX without repeating colors on every screen.
+const theme = new Proxy(PALETTES.midnight as Palette, {
+  get(_target, key: keyof Palette) { return PALETTES[activeTheme()][key] },
+})
 const PAGES = ["Home", "Actions", "Calibrate", "Settings", "Activity"] as const
 const PYTHON = process.env.TABLETAP_PYTHON || "python3"
 const CONFIG = join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "tabletap", "config.yaml")
@@ -54,18 +49,28 @@ function readConfig(): TableConfig {
     return { actions: {} }
   }
 }
-function loadProfile() {
+type Preferences = { profile?: string; theme?: PaletteName }
+function readPreferences(): Preferences {
   try {
-    const saved = JSON.parse(readFileSync(PREFS, "utf8")) as { profile?: string }
-    return saved.profile || "default"
-  } catch {
-    return "default"
-  }
+    const value: unknown = JSON.parse(readFileSync(PREFS, "utf8"))
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+    const record = value as Record<string, unknown>
+    return {
+      profile: typeof record.profile === "string" ? record.profile : undefined,
+      theme: isPaletteName(record.theme) ? record.theme : undefined,
+    }
+  } catch { return {} }
 }
-function saveProfile(profile: string) {
+function savePreferences(patch: Preferences) {
   if (IS_DEMO) return
   mkdirSync(dirname(PREFS), { recursive: true })
-  writeFileSync(PREFS, JSON.stringify({ profile }) + "\n", { mode: 0o600 })
+  writeFileSync(PREFS, JSON.stringify({ ...readPreferences(), ...patch }) + "\n", { mode: 0o600 })
+}
+function loadProfile() {
+  return readPreferences().profile || "default"
+}
+function saveProfile(profile: string) {
+  savePreferences({ profile })
 }
 function truncate(text: string, width: number): string {
   if (text.length <= width) return text
@@ -104,6 +109,8 @@ function App() {
   const [editText, setEditText] = createSignal("")
   const [commandOpen, setCommandOpen] = createSignal(false)
   const [commandText, setCommandText] = createSignal("")
+  const [commandSelection, setCommandSelection] = createSignal(0)
+  const commandMatches = createMemo(() => suggestCommands(commandText()))
   const [help, setHelp] = createSignal(false)
   const [calibrating, setCalibrating] = createSignal(false)
   const [micDevices, setMicDevices] = createSignal<MicDevice[]>([])
@@ -125,6 +132,21 @@ function App() {
   const isListening = createMemo(() => state() === "LISTENING" || state() === "PREVIEW")
   const waveText = createMemo(() => wave().map((value) => WAVE[Math.max(0, Math.min(7, value))] || "▁").join(""))
 
+  function switchTheme(name: PaletteName) {
+    try {
+      savePreferences({ theme: name })
+      setActiveTheme(name)
+      setNotice("Theme: " + name + " · Shift+T cycles themes")
+    } catch (error) {
+      setNotice("Theme not saved: " + String(error))
+    }
+  }
+  function openPalette() {
+    setCommandOpen(true)
+    setCommandText("")
+    setCommandSelection(0)
+    queueMicrotask(() => commandInput?.focus())
+  }
   function addLog(entry: string) {
     setEvents((items) => [timeNow() + "  " + entry, ...items].slice(0, 70))
   }
@@ -552,7 +574,17 @@ function App() {
         if (isListening()) void startBridge()
       } else if (arg) setNotice("Unknown profile: " + arg + " · valid: " + options.join(", "))
       else void selectProfile()
-    } else if (cmd === "help") setHelp(true)
+    } else if (cmd === "theme") {
+      const name = arg?.toLowerCase()
+      if (!name || name === "next") switchTheme(nextPalette(activeTheme()))
+      else if (isPaletteName(name)) switchTheme(name)
+      else setNotice("Unknown theme · choose: " + PALETTE_NAMES.join(", "))
+    } else if (cmd === "home") setPage(0)
+    else if (cmd === "actions") setPage(1)
+    else if (cmd === "settings") setPage(3)
+    else if (cmd === "activity") setPage(4)
+    else if (cmd === "builder") { setPage(1); setNotice("Select an action and press Enter to edit") }
+    else if (cmd === "help") setHelp(true)
     else if (cmd === "quit" || cmd === "exit") shutdown()
     else setNotice("Unknown command. Try /help.")
   }
@@ -591,8 +623,21 @@ function App() {
       if (key.name === "escape") {
         setCommandOpen(false)
         key.preventDefault()
+      } else if (key.name === "up" || (key.ctrl && key.name === "p")) {
+        setCommandSelection((v) => Math.max(0, v - 1))
+        key.preventDefault()
+      } else if (key.name === "down" || (key.ctrl && key.name === "n")) {
+        setCommandSelection((v) => Math.min(commandMatches().length - 1, v + 1))
+        key.preventDefault()
       } else if (key.name === "return" || key.name === "enter") {
-        runCommand(commandText())
+        const raw = commandText().trim().replace(/^[/:]/, "")
+        if (raw) {
+          const exact = isKnownCommand(raw.split(/\s+/, 1)[0] || "")
+          const suggestion = commandMatches()[commandSelection()]
+          runCommand(exact ? raw : suggestion?.command || raw)
+        } else {
+          setCommandOpen(false)
+        }
         key.preventDefault()
       }
       return
@@ -618,11 +663,9 @@ function App() {
     else if (key.name === "y") confirmLive()
     else if (key.name === "c") void calibrate()
     else if (key.name === "?") setHelp((v) => !v)
-    else if (key.name === "/" || key.name === ":") {
-      setCommandOpen(true)
-      setCommandText("")
-      queueMicrotask(() => commandInput?.focus())
-    } else if (page() === 1) {
+    else if ((key.ctrl && key.name === "k") || key.name === "/" || key.name === ":") openPalette()
+    else if ((key.shift && key.name === "t") || (page() === 3 && key.name === "h")) switchTheme(nextPalette(activeTheme()))
+    else if (page() === 1) {
       if (key.name === "up" || key.name === "k") setSelected((v) => Math.max(0, v - 1))
       if (key.name === "down" || key.name === "j") setSelected((v) => Math.min(rows().length - 1, v + 1))
       if (key.name === "return" || key.name === "enter" || key.name === "e") editAction()
@@ -645,6 +688,7 @@ function App() {
       return
     }
     setConfig(current)
+    setActiveTheme(readPreferences().theme || "midnight")
     void refreshDevices()
     if (!getProfiles(current).includes(profile())) setProfile("default")
     if (IS_DEMO) {
@@ -675,9 +719,8 @@ function App() {
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
-      <box flexDirection="row" justifyContent="space-between" paddingBottom={1}>
-        <text fg={theme.accent} attributes={TextAttributes.BOLD}>◈  tabletap</text>
-        <text fg={theme.dim}>{narrow() ? "v0.6" : "acoustic shortcuts  /  v0.6.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+      <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
+        <text fg={theme.dim}>{narrow() ? "v0.6.1" : "acoustic shortcuts  /  v0.6.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -692,7 +735,8 @@ function App() {
         <box marginTop={1} paddingX={2} paddingY={1} border borderColor={theme.accent} backgroundColor={theme.pane}>
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
           <text fg={theme.text}>1–5 pages · tab next · space start/stop · p profile · v request live · y confirm</text>
-          <text fg={theme.text}>c calibrate  ·  / commands  ·  j/k select action  ·  enter edit  ·  t action type</text>
+          <text fg={theme.text}>c calibrate · / or Ctrl+K searchable commands · Shift+T cycle theme · h theme in Settings</text>
+          <text fg={theme.text}>j/k select action · Enter edit · t action type · X/Esc panic stop · ? dismiss help</text>
           <text fg={theme.text}>m microphone · f 4 taps · +/- threshold · x/Esc PANIC STOP · ? help · q quit</text>
         </box>
       </Show>
@@ -781,6 +825,8 @@ function App() {
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>SETTINGS</text>
           <text fg={theme.dim}>Stored in {CONFIG}</text>
           <box backgroundColor={theme.pane} padding={2} gap={1}>
+            <text fg={theme.text}>Theme          {activeTheme()} · h or Shift+T to cycle</text>
+            <text fg={theme.dim}>Available themes: {PALETTE_NAMES.join(" / ")} · /theme nord</text>
             <text fg={theme.text}>Microphone     {truncate(
               micDevices().find((dev) => dev.index === config().audio?.device_index)?.name ||
                 (config().audio?.device_index === null || config().audio?.device_index === undefined
@@ -815,15 +861,26 @@ function App() {
       </Show>
       <Show when={commandOpen()}>
         <box marginTop={1} backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} paddingX={2} paddingY={1}>
-          <text fg={theme.dim}>/start  /stop  /calibrate  /profile [name]  /arm  /confirm  /safe  /panic  /help</text>
-          <input ref={(input) => { commandInput = input }} focused value={commandText()} onInput={setCommandText}
-            textColor={theme.text} focusedTextColor={theme.text} placeholder="Type a command…" />
+          <text fg={theme.accent}>COMMAND PALETTE · ↑/↓ choose · Enter run · Esc cancel</text>
+          <input ref={(input) => { commandInput = input }} focused value={commandText()}
+            onInput={(value) => { setCommandText(value); setCommandSelection(0) }}
+            textColor={theme.text} focusedTextColor={theme.text} placeholder="Search commands or type /theme nord…" />
+          <For each={commandMatches()}>{(item, index) =>
+            <box backgroundColor={index() === commandSelection() ? theme.active : "transparent"} paddingX={1}>
+              <text fg={index() === commandSelection() ? theme.accent : theme.dim}>
+                {item.command.padEnd(12)} {item.description}  [{item.shortcut}]
+              </text>
+            </box>
+          }</For>
+          <Show when={commandMatches().length === 0}>
+            <text fg={theme.dim}>No matches. Try /help or /theme nord.</text>
+          </Show>
         </box>
       </Show>
       <box paddingTop={1} border={["top"]} borderColor={theme.border} flexDirection="row" justifyContent="space-between">
         <text fg={theme.dim}>{truncate(notice(), Math.max(8, dimensions().width - (narrow() ? 10 : 67)))}</text>
         <Show when={!narrow()}>
-          <text fg={theme.dim}>space <span style={{ fg: theme.text }}>start/stop</span>   v+y <span style={{ fg: theme.text }}>arm</span>   x <span style={{ fg: theme.amber }}>STOP</span>   ? <span style={{ fg: theme.text }}>help</span></text>
+          <text fg={theme.dim}>Ctrl+K <span style={{ fg: theme.text }}>commands</span>   Shift+T <span style={{ fg: theme.text }}>theme</span>   v+y <span style={{ fg: theme.text }}>arm</span>   x <span style={{ fg: theme.amber }}>STOP</span>   ? <span style={{ fg: theme.text }}>help</span></text>
         </Show>
       </box>
     </box>
