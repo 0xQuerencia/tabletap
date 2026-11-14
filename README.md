@@ -422,3 +422,18 @@ A single laptop microphone cannot perfectly identify the source of a
 sound, especially when speech and desk taps overlap spectrally. This
 heuristic should be tested with real recordings from your machine before
 claiming speech is reliably eliminated.
+
+### TUI themes and command palette
+
+The top bar contains only listening status; navigation lives in the tabs.
+Press **Shift+T** from anywhere (or **h** in Settings) to cycle between
+`midnight` (default), `graphite`, `nord`, and `daylight` themes.
+The selected theme is saved locally in `~/.config/tabletap/tui.json`
+alongside the selected action profile. Older profile preferences still work.
+Themes affect only TUI appearance, not thresholds or gesture detection.
+
+Press **Ctrl+K** (or **/**) to open a searchable command palette; type part of
+a command or its description and choose with arrow keys and Enter. Commands
+include `/actions`, `/settings`, `/activity`, `/theme nord`,
+`/theme next`, and existing safe actions such as `/start`,
+`/safe`, `/panic`. Press **?** for a shortcut reference.
