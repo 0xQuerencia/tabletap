@@ -112,7 +112,7 @@ test("builder supports named profile actions with numeric YAML keys", () => {
     const result = updateConfigAction(path, "media", "2", {
       name: "Open notes", type: "exec", value: "xdg-open https://example.com",
     })
-    const action = (result.actions.media as Record<number, { name: string; value: string }>)[2]
+    const action = (result.actions.media as Record<number, { name: string; type: string; value: string }>)[2]
     expect(action).toEqual({ name: "Open notes", type: "exec", value: "xdg-open https://example.com" })
     expect(getActionRows(result, "media")[1]?.[0]).toBe("2")
   } finally { rmSync(dir, { recursive: true, force: true }) }
