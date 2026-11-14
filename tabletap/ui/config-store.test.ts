@@ -125,7 +125,7 @@ test("builder rejects invalid or demo updates before touching YAML", () => {
     const before = readFileSync(path, "utf8")
     expect(() => updateConfigAction(path, "default", "single", bad)).toThrow(/Enter a command/)
     expect(() => updateConfigAction(path, "default", "single", { ...bad, value: "xdg-open ." }, true)).toThrow(/read-only/)
-    expect(() => updateConfigAction(path, "media", "notnumeric", { ...bad, value: "xdg-open ." })).toThrow(/numeric/)
+    expect(() => updateConfigAction(path, "media", "notnumeric", { ...bad, value: "xdg-open ." })).toThrow(/numbered/)
     expect(readFileSync(path, "utf8")).toBe(before)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
