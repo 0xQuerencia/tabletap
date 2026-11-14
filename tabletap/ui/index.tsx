@@ -5,12 +5,15 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import {
-  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
+  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField, updateConfigAction,
   type Action, type TableConfig,
 } from "./config-store.ts"
 import { SAFE_ARM, requestArm, confirmArm, expireArm, type ArmState } from "./safety.ts"
 import { PALETTES, PALETTE_NAMES, isPaletteName, nextPalette, type Palette, type PaletteName } from "./themes.ts"
 import { suggestCommands, isKnownCommand } from "./commands.ts"
+import {
+  ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, type ActionDraft,
+} from "./action-builder.ts"
 
 type MicDevice = {
   index: number
@@ -107,6 +110,12 @@ function App() {
   const [selected, setSelected] = createSignal(0)
   const [editing, setEditing] = createSignal(false)
   const [editText, setEditText] = createSignal("")
+  const [builderOpen, setBuilderOpen] = createSignal(false)
+  const [builderDraft, setBuilderDraft] = createSignal<ActionDraft>({ name: "", type: "exec", value: "" })
+  const [builderField, setBuilderField] = createSignal(0)
+  const [builderPreset, setBuilderPreset] = createSignal(-1)
+  const [builderInputField, setBuilderInputField] = createSignal<"name" | "value">("value")
+  const [builderError, setBuilderError] = createSignal("")
   const [commandOpen, setCommandOpen] = createSignal(false)
   const [commandText, setCommandText] = createSignal("")
   const [commandSelection, setCommandSelection] = createSignal(0)
@@ -396,15 +405,6 @@ function App() {
       return false
     }
   }
-  function updateActionValue() {
-    const row = rows()[selected()]
-    if (!row) return
-    if (saveField(actionFieldPath(profile(), row[0], "value"), editText(),
-                  profile() + "/" + row[0])) {
-      editInput?.blur()
-      setEditing(false)
-    }
-  }
   function changeActionType() {
     const row = rows()[selected()]
     if (!row) return
@@ -413,16 +413,73 @@ function App() {
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
   }
-  function editAction() {
+  function openBuilder() {
     if (IS_DEMO) {
-      setNotice("Demo is read-only. Run tabletap without --demo to edit actions.")
+      setNotice("Demo is read-only. Run tabletap without --demo to build actions.")
       return
     }
     const row = rows()[selected()]
-    if (!row) return
-    setEditText(row[1]?.value || "")
+    if (!row) {
+      setPage(1)
+      setNotice("No action mapping selected. Configure a profile first.")
+      return
+    }
+    // Editing cannot leave a live action-capable listener armed.
+    disarm("Action Builder opened · live commands disabled")
+    setPage(1)
+    setBuilderDraft(normalizeActionDraft(row[1], row[0]))
+    setBuilderField(0)
+    setBuilderPreset(-1)
+    setBuilderError("")
+    setBuilderOpen(true)
+  }
+  function cycleBuilder(step: number) {
+    if (builderField() === 0) {
+      const draft = builderDraft()
+      const current = ACTION_TYPES.indexOf(draft.type)
+      const next = ACTION_TYPES[(current + step + ACTION_TYPES.length) % ACTION_TYPES.length] || "exec"
+      setBuilderDraft({ ...draft, type: next })
+      setBuilderPreset(-1)
+    } else if (builderField() === 1) {
+      const examples = presetsFor(builderDraft().type)
+      if (!examples.length) return
+      const at = ((builderPreset() + step) % examples.length + examples.length) % examples.length
+      const example = examples[at]
+      if (!example) return
+      setBuilderPreset(at)
+      setBuilderDraft({ name: example.name, type: example.type, value: example.value })
+    }
+    setBuilderError("")
+  }
+  function startBuilderInput(field: "name" | "value") {
+    setBuilderInputField(field)
+    setEditText(builderDraft()[field])
     setEditing(true)
     queueMicrotask(() => editInput?.focus())
+  }
+  function applyBuilderInput() {
+    setBuilderDraft((draft) => ({ ...draft, [builderInputField()]: editText() }))
+    setBuilderPreset(-1)
+    setBuilderError("")
+    editInput?.blur()
+    setEditing(false)
+  }
+  function saveBuilder() {
+    const row = rows()[selected()]
+    if (!row) { setBuilderError("Selected action no longer exists"); return }
+    const issue = validateActionDraft(builderDraft())
+    if (issue) { setBuilderError(issue); return }
+    try {
+      const updated = updateConfigAction(CONFIG, profile(), row[0], builderDraft(), IS_DEMO)
+      disarm("Action updated · live commands disabled", false)
+      setConfig(updated)
+      setBuilderOpen(false)
+      setNotice("Saved " + profile() + "/" + row[0] + " · one atomic update, original backed up")
+      addLog("Builder saved " + profile() + "/" + row[0])
+      if (isListening()) void startBridge()
+    } catch (error) {
+      setBuilderError(String(error))
+    }
   }
   async function refreshDevices() {
     try {
@@ -583,7 +640,7 @@ function App() {
     else if (cmd === "actions") setPage(1)
     else if (cmd === "settings") setPage(3)
     else if (cmd === "activity") setPage(4)
-    else if (cmd === "builder") { setPage(1); setNotice("Select an action and press Enter to edit") }
+    else if (cmd === "builder") openBuilder()
     else if (cmd === "help") setHelp(true)
     else if (cmd === "quit" || cmd === "exit") shutdown()
     else setNotice("Unknown command. Try /help.")
@@ -611,10 +668,11 @@ function App() {
     }
     if (editing()) {
       if (key.name === "escape") {
+        editInput?.blur()
         setEditing(false)
         key.preventDefault()
       } else if (key.name === "return" || key.name === "enter") {
-        updateActionValue()
+        applyBuilderInput()
         key.preventDefault()
       }
       return
@@ -647,6 +705,27 @@ function App() {
       shutdown()
       return
     }
+    if (builderOpen()) {
+      key.preventDefault()
+      if (key.name === "escape") {
+        setBuilderOpen(false)
+        setNotice("Action edit cancelled · original mapping kept")
+      } else if ((key.ctrl && key.name === "s") || key.name === "s") {
+        saveBuilder()
+      } else if (key.name === "tab" || key.name === "j" || key.name === "down") {
+        setBuilderField((v) => (v + (key.shift ? 3 : 1)) % 4)
+      } else if (key.name === "k" || key.name === "up") {
+        setBuilderField((v) => (v + 3) % 4)
+      } else if (key.name === "left") {
+        cycleBuilder(-1)
+      } else if (key.name === "right") {
+        cycleBuilder(1)
+      } else if (key.name === "enter" || key.name === "return") {
+        if (builderField() <= 1) cycleBuilder(1)
+        else startBuilderInput(builderField() === 2 ? "name" : "value")
+      }
+      return
+    }
     if (key.name === "x" || key.name === "escape") {
       key.preventDefault()
       void panicStop()
@@ -668,7 +747,7 @@ function App() {
     else if (page() === 1) {
       if (key.name === "up" || key.name === "k") setSelected((v) => Math.max(0, v - 1))
       if (key.name === "down" || key.name === "j") setSelected((v) => Math.min(rows().length - 1, v + 1))
-      if (key.name === "return" || key.name === "enter" || key.name === "e") editAction()
+      if (key.name === "return" || key.name === "enter" || key.name === "e" || key.name === "b") openBuilder()
       if (key.name === "t") changeActionType()
     } else if (page() === 3) {
       if (key.name === "+" || key.name === "=") adjustThreshold(2)
@@ -720,7 +799,7 @@ function App() {
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
-        <text fg={theme.dim}>{narrow() ? "v0.6.1" : "acoustic shortcuts  /  v0.6.1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.7.0" : "acoustic shortcuts  /  v0.7.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -736,7 +815,7 @@ function App() {
           <text fg={theme.accent}>KEYBOARD SHORTCUTS</text>
           <text fg={theme.text}>1–5 pages · tab next · space start/stop · p profile · v request live · y confirm</text>
           <text fg={theme.text}>c calibrate · / or Ctrl+K searchable commands · Shift+T cycle theme · h theme in Settings</text>
-          <text fg={theme.text}>j/k select action · Enter edit · t action type · X/Esc panic stop · ? dismiss help</text>
+          <text fg={theme.text}>j/k select · Enter/B action builder · S save · Esc cancel · t quick type · X panic</text>
           <text fg={theme.text}>m microphone · f 4 taps · +/- threshold · x/Esc PANIC STOP · ? help · q quit</text>
         </box>
       </Show>
@@ -780,23 +859,53 @@ function App() {
       <Show when={page() === 1}>
         <box flexGrow={1} paddingX={2} paddingTop={2} gap={1}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>ACTIONS</text>
-          <text fg={theme.dim}>Profile: {profile()} · Press p to switch · j/k to select · Enter to edit · t to switch action type</text>
-          <box border={["bottom"]} borderColor={theme.border} paddingBottom={1}>
-            <text fg={theme.dim}>GESTURE             TYPE        COMMAND</text>
-          </box>
-          <For each={rows()}>{([pattern, action], i) =>
-            <box backgroundColor={selected() === i() ? theme.active : "transparent"} paddingLeft={1} paddingY={0}>
-              <text fg={selected() === i() ? theme.accent : theme.text}>
-                {selected() === i() ? "› " : "  "}
-                {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
-              </text>
+          <Show when={!builderOpen()}>
+            <text fg={theme.dim}>Profile: {profile()} · P switch · J/K select · Enter/B build · T quick-cycle action type</text>
+            <box border={["bottom"]} borderColor={theme.border} paddingBottom={1}>
+              <text fg={theme.dim}>GESTURE             TYPE        COMMAND</text>
             </box>
-          }</For>
-          <Show when={editing()}>
-            <box marginTop={1} backgroundColor={theme.pane} border borderColor={theme.accent} padding={1}>
-              <text fg={theme.accent}>EDIT COMMAND · Enter save · Esc cancel</text>
-              <input ref={(input) => { editInput = input }} focused value={editText()} onInput={setEditText}
-                textColor={theme.text} focusedTextColor={theme.text} backgroundColor={theme.pane} />
+            <For each={rows()}>{([pattern, action], i) =>
+              <box backgroundColor={selected() === i() ? theme.active : "transparent"} paddingLeft={1} paddingY={0}>
+                <text fg={selected() === i() ? theme.accent : theme.text}>
+                  {selected() === i() ? "› " : "  "}
+                  {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
+                </text>
+              </box>
+            }</For>
+          </Show>
+          <Show when={builderOpen()}>
+            <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={2} gap={1}>
+              <text fg={theme.accent} attributes={TextAttributes.BOLD}>INTERACTIVE ACTION BUILDER</text>
+              <text fg={theme.dim}>{profile()} / {rows()[selected()]?.[0] || "unknown"} · J/K/Tab fields · ←/→ choices · Enter select/edit</text>
+              <text fg={builderField() === 0 ? theme.accent : theme.text}>
+                {builderField() === 0 ? "› " : "  "}Type      {builderDraft().type.toUpperCase()}  {builderField() === 0 ? "← / →" : ""}
+              </text>
+              <text fg={builderField() === 1 ? theme.accent : theme.text}>
+                {builderField() === 1 ? "› " : "  "}Preset    {builderPreset() < 0 ? "Custom (← / → to choose example)" :
+                  presetsFor(builderDraft().type)[builderPreset()]?.label || "Custom"}
+              </text>
+              <text fg={builderField() === 2 ? theme.accent : theme.text}>
+                {builderField() === 2 ? "› " : "  "}Name      {truncate(builderDraft().name, Math.max(12, dimensions().width - 24))}
+              </text>
+              <text fg={builderField() === 3 ? theme.accent : theme.text}>
+                {builderField() === 3 ? "› " : "  "}Command   {truncate(builderDraft().value, Math.max(12, dimensions().width - 24))}
+              </text>
+              <Show when={editing()}>
+                <box border={["top"]} borderColor={theme.border} paddingTop={1}>
+                  <text fg={theme.accent}>EDIT {builderInputField().toUpperCase()} · Enter apply · Esc cancel</text>
+                  <input ref={(input) => { editInput = input }} focused value={editText()} onInput={setEditText}
+                    textColor={theme.text} focusedTextColor={theme.text} backgroundColor={theme.pane} />
+                </box>
+              </Show>
+              <box marginTop={1} padding={1} backgroundColor={theme.active} gap={1}>
+                <text fg={theme.accent}>PREVIEW · NO COMMANDS EXECUTED</text>
+                <text fg={theme.text}>{builderDraft().type} → {truncate(builderDraft().value || "(unset)", Math.max(12, dimensions().width - 20))}</text>
+                <text fg={theme.dim}>Templates are examples; required programs must be installed locally.</text>
+              </box>
+              <Show when={builderError()}>
+                <text fg={theme.amber}>Cannot save: {builderError()}</text>
+              </Show>
+              <text fg={theme.good}>S / Ctrl+S save all fields atomically · Esc cancel · backup preserved</text>
             </box>
           </Show>
         </box>

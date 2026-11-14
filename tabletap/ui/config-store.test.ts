@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField,
+  actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField, updateConfigAction,
 } from "./config-store.ts"
 
 function fixture() {
@@ -86,5 +86,46 @@ test("system default microphone is represented as YAML null", () => {
     const result = updateConfigField(path, ["audio", "device_index"], null)
     expect(result.audio?.device_index).toBeNull()
     expect(readFileSync(path, "utf8")).toContain("device_index: null")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+
+test("builder saves name, type and command atomically with comments and backup", () => {
+  const { dir, path } = fixture()
+  try {
+    const result = updateConfigAction(path, "default", "single", {
+      name: "Music toggle", type: "key", value: "XF86AudioPlay",
+    })
+    const action = result.actions.single as { name: string; type: string; value: string }
+    expect(action).toEqual({ name: "Music toggle", type: "key", value: "XF86AudioPlay" })
+    const output = readFileSync(path, "utf8")
+    expect(output).toContain("# My annotated configuration")
+    expect(output).toContain("# original action")
+    expect(readFileSync(path + ".bak", "utf8")).toContain("value: spotify")
+    expect(getActionRows(result, "default")[0]?.[1].value).toBe("XF86AudioPlay")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test("builder supports named profile actions with numeric YAML keys", () => {
+  const { dir, path } = fixture()
+  try {
+    const result = updateConfigAction(path, "media", "2", {
+      name: "Open notes", type: "exec", value: "xdg-open https://example.com",
+    })
+    const action = (result.actions.media as Record<number, { name: string; value: string }>)[2]
+    expect(action).toEqual({ name: "Open notes", type: "exec", value: "xdg-open https://example.com" })
+    expect(getActionRows(result, "media")[1]?.[0]).toBe("2")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test("builder rejects invalid or demo updates before touching YAML", () => {
+  const { dir, path } = fixture()
+  const bad = { name: "Open", type: "exec" as const, value: "" }
+  try {
+    const before = readFileSync(path, "utf8")
+    expect(() => updateConfigAction(path, "default", "single", bad)).toThrow(/Enter a command/)
+    expect(() => updateConfigAction(path, "default", "single", { ...bad, value: "xdg-open ." }, true)).toThrow(/read-only/)
+    expect(() => updateConfigAction(path, "media", "notnumeric", { ...bad, value: "xdg-open ." })).toThrow(/numeric/)
+    expect(readFileSync(path, "utf8")).toBe(before)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })

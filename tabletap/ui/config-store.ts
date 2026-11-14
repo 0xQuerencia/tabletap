@@ -4,6 +4,7 @@ import {
   statSync, unlinkSync, writeFileSync,
 } from "node:fs"
 import YAML from "yaml"
+import { validateActionDraft, type ActionDraft } from "./action-builder.ts"
 
 export type ConfigField = string | number
 export type Action = { name?: string; type?: "key" | "exec" | "script"; value?: string }
@@ -73,9 +74,10 @@ export function actionFieldPath(profile: string, key: string, field: string): Co
  * Writes a backup and atomically renames a private, temporary file.
  * Re-reads from disk to preserve edits performed by other tools since startup.
  */
-export function updateConfigField(
-  path: string, fields: ConfigField[], value: string | number | boolean | null, demo = false,
-): TableConfig {
+type FieldUpdate = { fields: ConfigField[]; value: string | number | boolean | null }
+
+/** Write all fields in one backup and atomic replacement, never a partial action. */
+export function updateConfigFields(path: string, edits: FieldUpdate[], demo = false): TableConfig {
   if (demo) throw new Error("Demo mode is read-only")
   if (!existsSync(path)) throw new Error("Configuration not found: " + path)
   const before = statSync(path)
@@ -84,8 +86,10 @@ export function updateConfigField(
   if (document.errors.length) {
     throw new Error("Cannot edit invalid YAML: " + document.errors[0]?.message)
   }
-  if (fields.length === 0) throw new Error("No config field selected")
-  document.setIn(fields, value)
+  if (!edits.length || edits.some(({ fields }) => fields.length === 0)) {
+    throw new Error("No config field selected")
+  }
+  for (const { fields, value } of edits) document.setIn(fields, value)
   const updated = String(document)
   const parsed = YAML.parse(updated) as TableConfig
   if (!parsed || typeof parsed !== "object") throw new Error("Invalid updated configuration")
@@ -103,4 +107,24 @@ export function updateConfigField(
     if (existsSync(temp)) unlinkSync(temp)
   }
   return parsed
+}
+
+
+/** Keep legacy one-field edits while supporting all-or-nothing builder saves. */
+export function updateConfigField(
+  path: string, fields: ConfigField[], value: string | number | boolean | null, demo = false,
+): TableConfig {
+  return updateConfigFields(path, [{ fields, value }], demo)
+}
+
+export function updateConfigAction(
+  path: string, profile: string, gesture: string, draft: ActionDraft, demo = false,
+): TableConfig {
+  const problem = validateActionDraft(draft)
+  if (problem) throw new Error(problem)
+  return updateConfigFields(path, [
+    { fields: actionFieldPath(profile, gesture, "name"), value: draft.name.trim() },
+    { fields: actionFieldPath(profile, gesture, "type"), value: draft.type },
+    { fields: actionFieldPath(profile, gesture, "value"), value: draft.value.trim() },
+  ], demo)
 }

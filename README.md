@@ -437,3 +437,22 @@ a command or its description and choose with arrow keys and Enter. Commands
 include `/actions`, `/settings`, `/activity`, `/theme nord`,
 `/theme next`, and existing safe actions such as `/start`,
 `/safe`, `/panic`. Press **?** for a shortcut reference.
+
+### Interactive Action Builder (v0.7)
+
+Select an action on the **Actions** page (**2**, then **J/K**) and press
+**Enter** or **B** to open the built-in Action Builder. Choose a type
+(`exec`, `key`, or `script`), cycle example presets, edit the name and
+command, and inspect the **preview** without executing it. The examples
+are not an app installer: commands such as `foot` or `xdg-open` must
+already exist on your machine.
+
+In the builder, **J/K** or **Tab/Shift+Tab** selects a field,
+**Left/Right** cycles a type or example, and **Enter** opens editing for
+Name/Command (or cycles a choice). **S** or **Ctrl+S** saves every field
+in **one atomic YAML update** with a `config.yaml.bak` backup; **Esc**
+cancels. Saving or opening the builder disarms live actions. In demo mode
+the builder is read-only and cannot save changes. The palette command
+`/builder` opens the builder for the selected action.
+
+The default three-tap map and hardware detection remain unchanged.

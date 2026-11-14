@@ -22,7 +22,7 @@ def _prepare_ui():
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     ui = base / "tabletap" / ("ui-v" + __version__)
     ui.mkdir(parents=True, exist_ok=True)
-    for name in ("index.tsx", "config-store.ts", "safety.ts", "themes.ts", "commands.ts", "package.json", "tsconfig.json", "bunfig.toml"):
+    for name in ("index.tsx", "config-store.ts", "safety.ts", "themes.ts", "commands.ts", "action-builder.ts", "package.json", "tsconfig.json", "bunfig.toml"):
         shutil.copy2(bundled / name, ui / name)
     return ui
 
