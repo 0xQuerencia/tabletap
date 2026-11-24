@@ -6,6 +6,8 @@ import logging
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
+from .native_actions import execute_native
+
 try:
     import pynput
 except ImportError:
@@ -142,6 +144,8 @@ class ActionRunner:
             self._launch(value)
         elif action_type == "script":
             self._run_script(value)
+        elif action_type == "builtin":
+            execute_native(value)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
 

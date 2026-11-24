@@ -7,7 +7,7 @@ import YAML from "yaml"
 import { validateActionDraft, type ActionDraft } from "./action-builder.ts"
 
 export type ConfigField = string | number
-export type Action = { name?: string; type?: "key" | "exec" | "script"; value?: string }
+export type Action = { name?: string; type?: "key" | "exec" | "script" | "builtin"; value?: string }
 export type TableConfig = {
   // YAML contains both flat gesture actions and numbered profile maps.
   actions: Record<string, Action | Record<string | number, Action>>

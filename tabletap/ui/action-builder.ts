@@ -1,10 +1,16 @@
 /** Pure action-draft operations; presets are examples, never executed here. */
-export const ACTION_TYPES = ["exec", "key", "script"] as const
+import { readFileSync } from "node:fs"
+
+const NATIVE_ACTIONS: { id: string; label: string; argv: string[] }[] = JSON.parse(
+  readFileSync(new URL("./native-actions.json", import.meta.url), "utf8"),
+)
+export const ACTION_TYPES = ["exec", "key", "script", "builtin"] as const
 export type ActionType = typeof ACTION_TYPES[number]
 export type ActionDraft = { name: string; type: ActionType; value: string }
 export type ActionPreset = ActionDraft & { label: string }
 
 export const ACTION_PRESETS: readonly ActionPreset[] = [
+  ...NATIVE_ACTIONS.map((item): ActionPreset => ({ label: item.label, name: item.label, type: "builtin", value: item.id })),
   { label: "Open URL", name: "Open website", type: "exec", value: "xdg-open https://example.com" },
   { label: "File manager", name: "Open files", type: "exec", value: "xdg-open ." },
   { label: "Terminal (example)", name: "Open terminal", type: "exec", value: "foot" },
@@ -36,6 +42,7 @@ export function validateActionDraft(draft: ActionDraft): string | null {
   const value = draft.value.trim()
   if (!value) return "Enter a command or shortcut before saving"
   if (value.length > 1024 || /[\r\n\x00]/.test(value)) return "Command must be a single line under 1024 characters"
+  if (draft.type === "builtin" && !NATIVE_ACTIONS.some((item) => item.id === value)) return "Choose a known built-in action"
   if (draft.type === "key" && !/^[a-z0-9_]+(\+[a-z0-9_]+)*$/i.test(value)) {
     return "Shortcuts use tokens joined by + (example: ctrl+shift+t)"
   }

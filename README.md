@@ -456,3 +456,15 @@ the builder is read-only and cannot save changes. The palette command
 `/builder` opens the builder for the selected action.
 
 The default three-tap map and hardware detection remain unchanged.
+
+### Built-in action library
+
+In the Action Builder choose type **builtin**, then cycle the presets. Media controls use playerctl (MPRIS), audio controls use pactl, brightness uses brightnessctl and Hyprland controls require a Hyprland session. Missing tools produce a clear action failure; nothing is installed automatically. Toggle actions delegate to the actual system/player state, not a counter. Example YAML:
+
+```yaml
+actions:
+  double:
+    name: Toggle microphone
+    type: builtin
+    value: audio.mic_toggle
+```

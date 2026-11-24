@@ -1,8 +1,8 @@
 import { test, expect } from "bun:test"
 import { ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft } from "./action-builder.ts"
 
-test("builder always supplies 3 types and deliberate, nonexecuting presets", () => {
-  expect(ACTION_TYPES).toEqual(["exec", "key", "script"])
+test("builder always supplies supported types and deliberate, nonexecuting presets", () => {
+  expect(ACTION_TYPES).toEqual(["exec", "key", "script", "builtin"])
   for (const type of ACTION_TYPES) {
     expect(presetsFor(type).length).toBeGreaterThan(0)
     for (const preset of presetsFor(type)) {
@@ -25,4 +25,9 @@ test("validation rejects unsafe empty and malformed fields", () => {
   expect(validateActionDraft({ name: "Bad\nname", type: "exec", value: "firefox" })).toMatch(/single line/)
   expect(validateActionDraft({ name: "Good", type: "exec", value: "firefox\nrm -rf" })).toMatch(/single line/)
   expect(validateActionDraft({ name: "Okay", type: "key", value: "ctrl+shift+t" })).toBeNull()
+})
+
+test("built-in actions use known IDs rather than commands", () => {
+  expect(validateActionDraft({name:"Mute", type:"builtin", value:"audio.mic_toggle"})).toBeNull()
+  expect(validateActionDraft({name:"Bad", type:"builtin", value:"sh -c something"})).toMatch(/known built-in/)
 })
