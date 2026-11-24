@@ -65,6 +65,7 @@ class ActionRunner:
         self.category = category
         self.on_result = on_result
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="action")
+        self._slots = threading.BoundedSemaphore(2)
         self.display_server = _detect_display_server()
         self._cancelled = threading.Event()
         self._workflow_lock = threading.Lock()
@@ -85,7 +86,16 @@ class ActionRunner:
         action = self._get_action(key)
         if not isinstance(action, dict) or not str(action.get("value", "")).strip():
             return None
-        future = self._executor.submit(self._execute_action, action)
+        if not self._slots.acquire(blocking=False):
+            if self.on_result:
+                self.on_result(key, "failed", "Action workers busy; gesture dropped")
+            return None
+        try:
+            future = self._executor.submit(self._execute_action, action)
+        except RuntimeError:
+            self._slots.release()
+            return None
+        future.add_done_callback(lambda _: self._slots.release())
         if self.on_result is not None:
             def report(completed):
                 try:
@@ -112,7 +122,14 @@ class ActionRunner:
         if action is None:
             return
         
-        self._executor.submit(self._execute_action, action)
+        if not self._slots.acquire(blocking=False):
+            return
+        try:
+            future = self._executor.submit(self._execute_action, action)
+        except RuntimeError:
+            self._slots.release()
+            return
+        future.add_done_callback(lambda _: self._slots.release())
     
     def get_action(self, category: str, number: int) -> dict[str, Any] | None:
         cat_actions = self.actions.get(category)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import load_config, init_config, save_calibration
-from .daemon import Daemon
+from .daemon import run_service
 from .calibrate import calibrate
 from .filter import AdaptiveThreshold
 
@@ -159,6 +159,11 @@ def main():
     start_p = sub.add_parser("start", help="Start the tabletap daemon")
     start_p.add_argument("-c", "--config", help="Path to config.yaml")
     start_p.add_argument("--category", help="Action category to use (productivity, multitasking, smart_home, media)")
+    start_p.add_argument("--preview", action="store_true", help="Start the background service with actions disabled")
+    control_p = sub.add_parser("control", help="Control or watch the running background listener")
+    control_p.add_argument("operation", choices=("status","watch","safe","stop","reload","arm"))
+    control_p.add_argument("--category")
+    control_p.add_argument("--seconds", type=float, default=600)
 
     mon_p = sub.add_parser("monitor", help="Watch mic levels and spikes in real-time")
     mon_p.add_argument("-c", "--config", help="Path to config.yaml")
@@ -186,6 +191,7 @@ def main():
     sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
     service_p = sub.add_parser("service", help="Manage optional background systemd user-service integration")
     service_p.add_argument("service_action", choices=("install", "uninstall", "path"))
+    service_p.add_argument("--live", action="store_true", help="Explicitly enable persistent live actions for an installed service")
     devices_p = sub.add_parser("devices", help="List available microphone input devices")
     devices_p.add_argument("--json", action="store_true", help="Machine-readable microphone list")
     bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
@@ -214,6 +220,27 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "control":
+        import json
+        from .ipc import control_request, watch_events
+        try:
+            if args.operation == "watch":
+                for event in watch_events():
+                    print(event, flush=True)
+            else:
+                request = {"command":args.operation}
+                if args.operation == "arm": request["seconds"] = args.seconds
+                if args.operation == "reload": request["category"] = args.category
+                response = control_request(request)
+                print(json.dumps(response))
+                if "error" in response: sys.exit(1)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"error":str(exc)}))
+            sys.exit(1)
+        except KeyboardInterrupt:
+            pass
+        return
 
     if args.command == "actions":
         import json
@@ -251,7 +278,7 @@ def main():
         if args.service_action == "path":
             print(user_service_path())
         elif args.service_action == "install":
-            path = install_user_service(sys.executable)
+            path = install_user_service(sys.executable, live=args.live)
             print(f"[tabletap] Created {path} (uses {sys.executable})")
             print("Run: systemctl --user daemon-reload")
             print("Then: systemctl --user enable --now tabletap.service")
@@ -400,8 +427,7 @@ def main():
     )
 
     if args.command == "start":
-        daemon = Daemon(cfg, category=args.category if hasattr(args, 'category') else None)
-        daemon.run()
+        sys.exit(run_service(args.config, args.category, preview=args.preview))
 
     elif args.command == "monitor":
         monitor_cmd(cfg)

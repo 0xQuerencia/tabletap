@@ -517,3 +517,7 @@ Browse built-ins in Action Builder, choose a preset, and edit its argument if ne
 - **KDE / GNOME:** KRunner, KDE Show Desktop via its global shortcut D-Bus service, GNOME workspace and overview shortcuts. These depend on the desktop and configured keyboard backend.
 - **VS Code:** Focus the editor before using the build, quick open and command palette shortcut actions; they are not application automation APIs.
 - **X:** `x.dictation_toggle` uses the X project's documented `x dictation toggle` command; `x.stop` stops its current agent task. The `x` executable must be installed.
+
+### Shared background listener and local control
+
+`tabletap start --preview` runs the same recognition engine as the TUI and exposes a private Unix socket. The generated systemd service starts in safe preview by default; reinstall it using `tabletap service install --live` only when you explicitly want persistent, calibrated live actions. Use `tabletap control status`, `watch`, `safe`, `arm --seconds 600`, `reload --category media` or `stop`. Reload always disarms; live expiry returns to preview. The control protocol accepts only these commands and no arbitrary action data. Slow subscribers are disconnected without blocking audio. The old independent daemon loop was removed. Initial live mode now requires calibration, rather than auto-calibrating in an unattended background session.
