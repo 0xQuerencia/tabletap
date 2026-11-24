@@ -20,5 +20,9 @@ def execute_native(action_id: str):
         raise RuntimeError("This action requires a running Hyprland session")
     if not shutil.which(argv[0]):
         raise RuntimeError(f"{item['label']} requires {argv[0]} (not installed)")
-    subprocess.run(argv, check=True, timeout=5, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.PIPE, text=True)
+    try:
+        subprocess.run(argv, check=True, timeout=5, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, text=True)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip().replace("\\n", " ")[:200]
+        raise RuntimeError(f"{item['label']} failed: {detail or exc.returncode}") from exc
