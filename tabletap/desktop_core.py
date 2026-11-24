@@ -86,8 +86,17 @@ class DesktopSession:
         state = self.status()["state"]
         if state.get("type") == "ready":
             self._same_config(state)
+            if state.get("dry_run") and state.get("category") == profile:
+                return
             self._request("reload", category=None if profile == "default" else profile)
-            return
+            end = time.monotonic() + 6
+            while time.monotonic() < end:
+                state = self.status()["state"]
+                if state.get("type") == "ready" and state.get("dry_run") and state.get("category") == profile:
+                    self._same_config(state)
+                    return
+                time.sleep(.1)
+            raise RuntimeError("Preview did not become ready.")
         if state.get("type") != "stopped":
             raise RuntimeError("The listener is changing state; try again.")
         cmd = [sys.executable, "-m", "tabletap", "start", "--preview", "-c", str(self.path)]

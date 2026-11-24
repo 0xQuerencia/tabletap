@@ -112,12 +112,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install native GTK runtime
-        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-gtk-4.0 python3-venv portaudio19-dev xvfb xauth dbus-x11
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-gtk-4.0 python3-venv portaudio19-dev xvfb xauth dbus-x11 imagemagick
       - name: Install TableTap
         run: |
           /usr/bin/python3 -m venv --system-site-packages /tmp/tabletap-desktop
           /tmp/tabletap-desktop/bin/pip install -e ".[dev]"
       - name: Render every desktop page and onboarding stage
-        run: dbus-run-session -- xvfb-run -a /tmp/tabletap-desktop/bin/tabletap desktop --demo --smoke
+        run: TABLETAP_RENDER_DIR="$PWD/desktop-renders" dbus-run-session -- xvfb-run -a -s "-screen 0 1100x690x24" /tmp/tabletap-desktop/bin/tabletap desktop --demo --smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tabletap-desktop-renders
+          path: desktop-renders/*.png
+          if-no-files-found: error
       - name: Test desktop controls and launcher
         run: /tmp/tabletap-desktop/bin/python -m pytest -q tests/test_desktop_core.py tests/test_desktop_install.py
