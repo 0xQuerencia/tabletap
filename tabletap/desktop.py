@@ -37,6 +37,11 @@ progressbar progress { background: #e6a15d; border-radius: 8px; min-height: 7px;
 .success { color: #a1c6a1; }
 .error { color: #f0a48e; }
 .lesson { font-size: 34px; font-weight: 800; letter-spacing: -1px; }
+.tap-ring { border: 1px solid #654c32; border-radius: 100px; padding: 18px; }
+.tap-inner { border: 2px solid #9a7049; border-radius: 100px; padding: 16px; }
+.tap-core { background: #e6a15d; color: #21170f; border-radius: 80px; min-width: 64px; min-height: 64px; font-size: 26px; font-weight: 700; }
+.tap-success { background: #a1c6a1; }
+window.light .tap-core { color: #21170f; }
 .light window, window.light { background: #f6f2eb; color: #26221d; }
 window.light label { color: #26221d; }
 window.light .sidebar, window.light .panel { background: #ebe5dc; border-color: #d5cbbd; }
@@ -91,6 +96,7 @@ def run_desktop(demo=False, smoke=False):
     def dropdown(items, current=0):
         w = Gtk.DropDown.new_from_strings(items)
         w.set_selected(current)
+        w.set_enable_search(len(items) > 8)
         w.set_hexpand(True)
         return w
 
@@ -105,6 +111,7 @@ def run_desktop(demo=False, smoke=False):
             self.session = None
             self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desktop")
             self.busy = False
+            self.polling = False
             self.closed = False
             self.state = {"type": "stopped"}
             self.history = deque(maxlen=30)
@@ -231,11 +238,11 @@ def run_desktop(demo=False, smoke=False):
         def poll(self):
             if self.closed:
                 return False
-            if not self.busy:
-                self.busy = True
+            if not self.busy and not self.polling:
+                self.polling = True
                 future = self.worker.submit(self.session.status)
                 def apply():
-                    self.busy = False
+                    self.polling = False
                     if self.closed:
                         return False
                     try:
@@ -378,8 +385,12 @@ def run_desktop(demo=False, smoke=False):
             card.append(controls)
             card.append(label("Preview detects taps without running commands. Closing this window leaves the listener running; live authorization expires after 10 minutes.", "muted", True))
             self.content.append(card)
+            self.content.append(label("Profile: " + self.state.get("category", self.profile), "muted"))
             self.content.append(label("YOUR SHORTCUTS", "section"))
-            for i, (_, action) in enumerate(rows(self.cfg, self.profile)[:4], 1):
+            active = self.state.get("category", self.profile)
+            if active not in profiles(self.cfg):
+                active = "default"
+            for i, (_, action) in enumerate(rows(self.cfg, active)[:4], 1):
                 row = panel()
                 row.append(label("● " * i, "rhythm"))
                 row.append(label(action.get("name") or action.get("value") or "Not assigned", wrap=True))
@@ -424,6 +435,95 @@ def run_desktop(demo=False, smoke=False):
             self.profile = profile
             self.render()
 
+        def edit_sequence(self, parent, value):
+            from .workflow import parse_workflow
+            try:
+                steps = parse_workflow(value.get_text())
+            except ValueError:
+                steps = []
+            dialog = Gtk.Dialog(title="Edit action sequence", transient_for=parent, modal=True)
+            dialog.set_default_size(650, 420)
+            body = dialog.get_content_area()
+            body.set_spacing(10)
+            body.set_margin_top(16)
+            body.set_margin_bottom(16)
+            body.set_margin_start(16)
+            body.set_margin_end(16)
+            body.append(label("Actions run in order. Add a wait to space them apart.", "subtitle", True))
+            scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+            scroll.set_vexpand(True)
+            items = box(spacing=8)
+            scroll.set_child(items)
+            body.append(scroll)
+            error = label("", "error", True)
+            widgets = []
+            types = ["builtin", "key", "exec", "script", "wait"]
+            def collect():
+                result = []
+                for kind, entry in widgets:
+                    t = types[kind.get_selected()]
+                    raw = entry.get_text().strip()
+                    if t == "wait":
+                        try:
+                            raw = float(raw)
+                        except ValueError:
+                            pass
+                    result.append({"type": t, "value": raw})
+                return result
+            def rebuild():
+                clear(items)
+                widgets.clear()
+                for i, step in enumerate(steps):
+                    row = box(False, 6)
+                    row.append(label(str(i+1) + "."))
+                    kind = dropdown(types, types.index(step["type"]))
+                    kind.set_hexpand(False)
+                    entry = text_entry(str(step["value"]), "Command or wait in ms")
+                    widgets.append((kind, entry))
+                    row.append(kind)
+                    row.append(entry)
+                    def move(offset, index=i):
+                        steps[:] = collect()
+                        target = index + offset
+                        if 0 <= target < len(steps):
+                            steps[index], steps[target] = steps[target], steps[index]
+                            rebuild()
+                    def remove(index=i):
+                        steps[:] = collect()
+                        del steps[index]
+                        rebuild()
+                    up = button("↑", lambda fn=move: fn(-1))
+                    down = button("↓", lambda fn=move: fn(1))
+                    up.set_sensitive(i > 0)
+                    down.set_sensitive(i < len(steps)-1)
+                    row.append(up)
+                    row.append(down)
+                    row.append(button("Remove", remove))
+                    items.append(row)
+            def add():
+                steps[:] = collect()
+                if len(steps) >= 20:
+                    error.set_text("At most 20 steps.")
+                    return
+                steps.append({"type": "wait", "value": 500})
+                rebuild()
+            body.append(button("Add step", add))
+            body.append(error)
+            dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Apply sequence", Gtk.ResponseType.OK)
+            def save(d, response):
+                if response == Gtk.ResponseType.OK:
+                    encoded = json.dumps(collect(), allow_nan=True)
+                    try:
+                        parse_workflow(encoded)
+                    except ValueError as exc:
+                        error.set_text(str(exc))
+                        return
+                    value.set_text(encoded)
+                d.destroy()
+            dialog.connect("response", save)
+            rebuild()
+            dialog.present()
+
         def edit_mapping(self, key, action):
             if self.busy:
                 return
@@ -446,8 +546,13 @@ def run_desktop(demo=False, smoke=False):
                     name.set_text(item["label"])
                     value.set_text(item["id"] + (":" + item["example"] if item.get("parameter") else ""))
             presets.connect("notify::selected", preset)
-            for w in (label("Name", "section"), name, label("Action type", "section"), kind, presets, value,
-                      label("Workflows accept the existing sequential JSON format. Launcher values name a profile. Saving stops the listener.", "muted", True)):
+            sequence = button("Edit sequence", lambda: self.edit_sequence(dialog, value))
+            def type_changed(w, *_):
+                sequence.set_visible(ACTION_TYPES[w.get_selected()] == "workflow")
+            kind.connect("notify::selected", type_changed)
+            type_changed(kind)
+            for w in (label("Name", "section"), name, label("Action type", "section"), kind, presets, value, sequence,
+                      label("Launcher values name a profile. Saving stops the listener. No commands execute while editing.", "muted", True)):
                 body.append(w)
             dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Save", Gtk.ResponseType.OK)
             def save(d, response):
@@ -610,6 +715,24 @@ def run_desktop(demo=False, smoke=False):
             self.practiced = self.calibrated = False
             self.render()
 
+        def tap_illustration(self, success=False):
+            outer = box()
+            outer.add_css_class("tap-ring")
+            outer.set_halign(Gtk.Align.CENTER)
+            outer.set_valign(Gtk.Align.CENTER)
+            inner = box()
+            inner.add_css_class("tap-inner")
+            inner.set_halign(Gtk.Align.CENTER)
+            inner.set_valign(Gtk.Align.CENTER)
+            core = label("✓" if success else "●", "tap-core")
+            core.set_halign(Gtk.Align.CENTER)
+            core.set_valign(Gtk.Align.CENTER)
+            if success:
+                core.add_css_class("tap-success")
+            inner.append(core)
+            outer.append(inner)
+            return outer
+
         def onboarding_view(self):
             scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
             scroll.set_hexpand(True)
@@ -637,7 +760,7 @@ def run_desktop(demo=False, smoke=False):
             outer.append(spacer(True))
             outer.append(label(("Your desk is a button.", "First, let’s listen.", "Teach us your desk.", "Make it yours.", "Try a double tap.", "You’re ready.")[self.lesson], "lesson", True))
             if self.lesson == 0:
-                outer.append(label("●  ●", "rhythm"))
+                outer.append(self.tap_illustration())
                 outer.append(label("Turn desk taps into shortcuts. No extra hardware. No accounts.", "subtitle", True))
             elif self.lesson == 1:
                 outer.append(label("The microphone listens for short impacts. Your audio stays on your computer.", "subtitle", True))
@@ -656,7 +779,7 @@ def run_desktop(demo=False, smoke=False):
                         self.render()
                     outer.append(button(("✓ " if self.choice["value"] == value else "") + title, choose, "selected" if self.choice["value"] == value else None))
             elif self.lesson == 4:
-                outer.append(label("●  ●", "rhythm"))
+                outer.append(self.tap_illustration(self.practiced))
                 outer.append(label("Tap twice within a second, then wait. Preview never runs the mapped command.", "subtitle", True))
                 outer.append(button("Start safe practice", lambda: self.async_job(lambda: self.session.start("default"), lambda _: self.start_watch()), "accent"))
                 outer.append(label("✓ Double tap recognized!" if self.practiced else "Waiting for a real double tap…", "success" if self.practiced else "muted"))
