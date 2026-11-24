@@ -65,47 +65,13 @@ def test_invalid_workflow(value):
         parse_workflow(value)
 
 
-def test_conditional_uses_only_selected_branch():
+@pytest.mark.parametrize("kind", ["parallel", "if"])
+def test_removed_workflow_blocks_rejected_before_any_dispatch(kind):
     runner = ActionRunner({})
-    block = {"condition":{"type":"tool_available","value":"playerctl"},"then":[{"type":"exec","value":"yes"}],"else":[{"type":"exec","value":"no"}]}
     try:
-        with patch("tabletap.action.evaluate_condition", return_value=False), patch.object(runner, "_launch") as launch:
-            runner._run_workflow(workflow(("if", block)))
-            launch.assert_called_once_with("no")
+        with patch.object(runner, "_launch") as launch:
+            with pytest.raises(ValueError, match="unsupported action"):
+                runner._run_workflow(workflow(("exec", "first"), (kind, [])))
+            launch.assert_not_called()
     finally:
         runner.shutdown()
-
-
-def test_parallel_completes_before_next_step():
-    runner = ActionRunner({})
-    barrier = threading.Barrier(2)
-    done = []
-    def launch(value):
-        if value != "after":
-            barrier.wait(timeout=2)
-        else:
-            assert set(done) == {"first", "second"}
-        done.append(value)
-    try:
-        with patch.object(runner, "_launch", side_effect=launch):
-            runner._run_workflow(workflow(("parallel", [{"type":"exec","value":"first"},{"type":"exec","value":"second"}]), ("exec", "after")))
-        assert done[-1] == "after"
-    finally:
-        runner.shutdown()
-
-
-def test_parallel_invalid_shortcut_and_untaken_branch_rejected():
-    with pytest.raises(ValueError, match="keyboard"):
-        parse_workflow(workflow(("parallel",[{"type":"key","value":"ctrl+a"},{"type":"exec","value":"true"}])))
-    with pytest.raises(ValueError, match="unsupported action"):
-        parse_workflow(workflow(("if",{"condition":{"type":"hyprland"},"then":[{"type":"exec","value":"true"}],"else":[{"type":"launcher","value":"bad"}]})))
-
-
-def test_state_query_fails_closed_on_unexpected_response():
-    from tabletap.workflow import evaluate_condition
-    from types import SimpleNamespace
-    with patch("tabletap.workflow.subprocess.run", return_value=SimpleNamespace(stdout="Mute: yes\n")):
-        assert evaluate_condition({"type":"microphone_muted"})
-    with patch("tabletap.workflow.subprocess.run", return_value=SimpleNamespace(stdout="unknown")):
-        with pytest.raises(RuntimeError, match="determine"):
-            evaluate_condition({"type":"microphone_muted"})

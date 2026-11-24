@@ -58,18 +58,15 @@ test("launcher presets use actual named profiles, never the default map", () => 
 })
 
 
-test("advanced blocks validate and reject invalid branches", () => {
-  expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([defaultStep("parallel"), defaultStep("if")])})).toBeNull()
-  expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([{type:"parallel",value:[{type:"key",value:"ctrl+a"},{type:"exec",value:"true"}]}])})).toMatch(/Keyboard/)
-})
-
-
-test("parameterized integrations validate entity IDs and explicit shortcuts", () => {
-  const a = {name:"Integration",type:"builtin" as const}
-  expect(validateActionDraft({...a,value:"home.light_toggle:light.desk"})).toBeNull()
-  expect(validateActionDraft({...a,value:"home.light_toggle:lock.door"})).toMatch(/entity ID/)
-  expect(validateActionDraft({...a,value:"discord.mute:ctrl+shift+m"})).toBeNull()
-  expect(validateActionDraft({...a,value:"obs.scene"})).toMatch(/parameter/)
+test("removed workflow blocks and application presets are rejected", () => {
+  const draft = {name:"Action",type:"workflow" as const}
+  for (const type of ["parallel","if"]) {
+    expect(validateActionDraft({...draft,value:JSON.stringify([{type,value:[]}])})).toMatch(/Unsupported/)
+  }
+  for (const value of ["obs.record_toggle","home.light_toggle:light.desk","discord.mute:ctrl+m","vscode.build","x.stop"]) {
+    expect(validateActionDraft({name:"Removed",type:"builtin",value})).toMatch(/known built-in/)
+  }
+  expect(validateActionDraft({name:"Notification",type:"builtin",value:"notify:Ready"})).toBeNull()
 })
 
 test("library searches across categories and named launchers",async()=>{

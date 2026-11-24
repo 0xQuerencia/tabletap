@@ -634,7 +634,7 @@ function App() {
   function editWorkflowStep() {
     const step = workflowSteps()[workflowIndex()]
     if (!step) return
-    setEditText(typeof step.value === "object" ? JSON.stringify(step.value) : String(step.value))
+    setEditText(String(step.value))
     setEditing(true)
     queueMicrotask(() => editInput?.focus())
   }
@@ -658,10 +658,7 @@ function App() {
       const step = workflowSteps()[workflowIndex()]
       if (!step) return
       const raw = editText().trim()
-      let value: WorkflowStep["value"] = step.type === "wait" && raw ? Number(raw) : raw
-      if (step.type === "parallel" || step.type === "if") {
-        try { value = JSON.parse(raw) } catch { setBuilderError("Invalid JSON block"); return }
-      }
+      const value = step.type === "wait" && raw ? Number(raw) : raw
       const problem = validateWorkflow(JSON.stringify([{type: step.type, value}]))
       if (problem) { setBuilderError(problem); return }
       replaceWorkflowStep({type:step.type, value})
@@ -995,7 +992,7 @@ function App() {
         const offset = key.name === "left" ? -1 : 1
         const kind = STEP_TYPES[(STEP_TYPES.indexOf(step.type) + offset + STEP_TYPES.length) % STEP_TYPES.length]!
         replaceWorkflowStep(defaultStep(kind))
-      } else if (key.name === "p" && step && step.type !== "wait" && step.type !== "parallel" && step.type !== "if") {
+      } else if (key.name === "p" && step && step.type !== "wait") {
         const presets = presetsFor(step.type)
         const at = presets.findIndex(preset => preset.value === step.value)
         const next = presets[(at + 1) % presets.length]
@@ -1188,7 +1185,7 @@ function App() {
             <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={1} gap={1}>
               <text fg={theme.accent} attributes={TextAttributes.BOLD}>WORKFLOW STEPS · {workflowSteps().length}/20</text>
               <text fg={theme.dim}>A add · D delete · J/K select · Ctrl+↑/↓ reorder</text>
-              <text fg={theme.dim}>←/→ type · P preset · Enter edit (blocks use JSON) · S apply · Esc discard</text>
+              <text fg={theme.dim}>←/→ type · P preset · Enter edit · S apply · Esc discard</text>
               <Show when={!workflowSteps().length}><text fg={theme.dim}>No steps yet. Press A to add one.</text></Show>
               <For each={workflowRows()}>{(step, i) =>
                 <text fg={workflowIndex() === i() + workflowStart() ? theme.accent : theme.text}>
@@ -1206,7 +1203,7 @@ function App() {
           <Show when={builderOpen() && libraryOpen()}>
             <box backgroundColor={theme.pane} padding={1} gap={1}>
               <text fg={theme.accent} attributes={TextAttributes.BOLD}>ACTION LIBRARY · {libraryMatches().length} matches</text>
-              <input ref={(input)=>{libraryInput=input}} focused value={libraryQuery()} onInput={v=>{setLibraryQuery(v);setLibraryIndex(0)}} placeholder="Search media, OBS, shortcuts, apps…" textColor={theme.text} />
+              <input ref={(input)=>{libraryInput=input}} focused value={libraryQuery()} onInput={v=>{setLibraryQuery(v);setLibraryIndex(0)}} placeholder="Search media, shortcuts, apps…" textColor={theme.text} />
               <For each={libraryMatches().slice(libraryStart(),libraryStart()+6)}>{(item,i)=><text fg={libraryIndex()===libraryStart()+i()?theme.accent:theme.text}>{libraryIndex()===libraryStart()+i()?"› ":"  "}{truncate(item.label+" · "+item.type,Math.max(12,dimensions().width-12))}</text>}</For>
               <text fg={theme.dim}>↑/↓ choose · Enter use draft · Esc back · no commands run</text>
             </box>
