@@ -468,3 +468,15 @@ actions:
     type: builtin
     value: audio.mic_toggle
 ```
+
+### Sequential workflows (initial engine)
+
+Choose **workflow** in the Action Builder and edit its JSON step array. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait. The visual step-by-step editor and parallel/conditional execution are not yet included.
+
+```yaml
+actions:
+  triple:
+    name: Coding session
+    type: workflow
+    value: '[{"type":"exec","value":"code"},{"type":"wait","value":500},{"type":"exec","value":"foot"}]'
+```

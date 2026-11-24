@@ -137,8 +137,10 @@ class Daemon:
                     self._dispatch(self.pattern_detector.check_window_timeout())
         except MicDisconnected as e:
             log.error("Microphone permanently disconnected: %s", e)
-            self.lock.release()
             sys.exit(1)
+        finally:
+            self.action_runner.shutdown()
+            self.lock.release()
 
         log.info("tabletap stopped.")
 
@@ -177,9 +179,8 @@ class Daemon:
 
     def _handle_signal(self, signum, frame):
         log.info("Received signal %s, shutting down...", signum)
-        self.action_runner.shutdown()
-        self.lock.release()
         self._running = False
+        self.action_runner.cancel()
 
     def _handle_reload(self, signum, frame):
         log.info("Received SIGHUP, will reload config...")

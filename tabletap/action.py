@@ -3,10 +3,13 @@ import subprocess
 import shlex
 import shutil
 import logging
+import threading
+import time
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 
 from .native_actions import execute_native
+from .workflow import parse_workflow
 
 try:
     import pynput
@@ -62,6 +65,9 @@ class ActionRunner:
         self.on_result = on_result
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="action")
         self.display_server = _detect_display_server()
+        self._cancelled = threading.Event()
+        self._workflow_lock = threading.Lock()
+        self.deadline = None
         
         self._category_map = {}
         if category and category in actions_cfg:
@@ -72,6 +78,8 @@ class ActionRunner:
                         self._category_map[int(num)] = action
 
     def run(self, key: str):
+        if self._cancelled.is_set():
+            return None
         action = self._get_action(key)
         if not isinstance(action, dict) or not str(action.get("value", "")).strip():
             return None
@@ -133,6 +141,7 @@ class ActionRunner:
         return action
     
     def _execute_action(self, action: dict[str, Any]):
+        self._check_authorized()
         action_type = action.get("type", "key")
         value = action.get("value", "")
         if not value:
@@ -146,8 +155,40 @@ class ActionRunner:
             self._run_script(value)
         elif action_type == "builtin":
             execute_native(value)
+        elif action_type == "workflow":
+            self._run_workflow(value)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
+
+    def _check_authorized(self):
+        if self._cancelled.is_set() or (self.deadline is not None and time.monotonic() >= self.deadline):
+            raise RuntimeError("Action cancelled: listener stopped or authorization expired")
+
+    def cancel(self):
+        self._cancelled.set()
+
+    def _run_workflow(self, value: str):
+        steps = parse_workflow(value)
+        if not self._workflow_lock.acquire(blocking=False):
+            raise RuntimeError("Another workflow is already running")
+        try:
+            for index, step in enumerate(steps, 1):
+                self._check_authorized()
+                try:
+                    if step["type"] == "wait":
+                        end = time.monotonic() + step["value"] / 1000
+                        while True:
+                            self._check_authorized()
+                            remaining = end - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            self._cancelled.wait(min(remaining, 0.1))
+                    else:
+                        self._execute_action(step)
+                except Exception as exc:
+                    raise RuntimeError(f"Workflow step {index} failed: {exc}") from exc
+        finally:
+            self._workflow_lock.release()
 
     def _press_key(self, combo: str):
         parts = combo.lower().split("+")
@@ -345,5 +386,6 @@ class ActionRunner:
             raise RuntimeError(f"Script launch failed: {e}") from e
     
     def shutdown(self):
-        self._executor.shutdown(wait=True, cancel_futures=False)
+        self.cancel()
+        self._executor.shutdown(wait=True, cancel_futures=True)
 

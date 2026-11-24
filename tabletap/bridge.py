@@ -108,6 +108,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     def stop(_signum, _frame):
         nonlocal running
         running = False
+        runner.cancel()
 
     previous_int = signal.signal(signal.SIGINT, stop)
     previous_term = signal.signal(signal.SIGTERM, stop)
@@ -134,6 +135,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
             )
             last_level_at = 0.0
             deadline = time.monotonic() + live_seconds if live_seconds is not None else None
+            runner.deadline = deadline
             while running:
                 # Enforced inside the Python action-capable process, even if
                 # the terminal UI freezes or its timer never gets CPU time.
