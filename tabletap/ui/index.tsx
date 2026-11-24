@@ -480,7 +480,7 @@ function App() {
   function editWorkflowStep() {
     const step = workflowSteps()[workflowIndex()]
     if (!step) return
-    setEditText(String(step.value))
+    setEditText(typeof step.value === "object" ? JSON.stringify(step.value) : String(step.value))
     setEditing(true)
     queueMicrotask(() => editInput?.focus())
   }
@@ -504,7 +504,10 @@ function App() {
       const step = workflowSteps()[workflowIndex()]
       if (!step) return
       const raw = editText().trim()
-      const value = step.type === "wait" && raw ? Number(raw) : raw
+      let value: WorkflowStep["value"] = step.type === "wait" && raw ? Number(raw) : raw
+      if (step.type === "parallel" || step.type === "if") {
+        try { value = JSON.parse(raw) } catch { setBuilderError("Invalid JSON block"); return }
+      }
       const problem = validateWorkflow(JSON.stringify([{type: step.type, value}]))
       if (problem) { setBuilderError(problem); return }
       replaceWorkflowStep({type:step.type, value})
@@ -790,7 +793,7 @@ function App() {
         const offset = key.name === "left" ? -1 : 1
         const kind = STEP_TYPES[(STEP_TYPES.indexOf(step.type) + offset + STEP_TYPES.length) % STEP_TYPES.length]!
         replaceWorkflowStep(defaultStep(kind))
-      } else if (key.name === "p" && step && step.type !== "wait") {
+      } else if (key.name === "p" && step && step.type !== "wait" && step.type !== "parallel" && step.type !== "if") {
         const presets = presetsFor(step.type)
         const at = presets.findIndex(preset => preset.value === step.value)
         const next = presets[(at + 1) % presets.length]
@@ -974,7 +977,7 @@ function App() {
             <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={1} gap={1}>
               <text fg={theme.accent} attributes={TextAttributes.BOLD}>WORKFLOW STEPS · {workflowSteps().length}/20</text>
               <text fg={theme.dim}>A add · D delete · J/K select · Ctrl+↑/↓ reorder</text>
-              <text fg={theme.dim}>←/→ type · P preset · Enter edit · S apply · Esc discard</text>
+              <text fg={theme.dim}>←/→ type · P preset · Enter edit (blocks use JSON) · S apply · Esc discard</text>
               <Show when={!workflowSteps().length}><text fg={theme.dim}>No steps yet. Press A to add one.</text></Show>
               <For each={workflowRows()}>{(step, i) =>
                 <text fg={workflowIndex() === i() + workflowStart() ? theme.accent : theme.text}>

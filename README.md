@@ -471,7 +471,7 @@ The default three-tap map and hardware detection remain unchanged.
 
 ### Sequential workflows (initial engine)
 
-Choose **workflow** in the Action Builder, select Steps and press Enter. Add with A, delete with D, select with J/K, reorder with Ctrl+arrow, change type with left/right, choose a preset with P and edit the selected step with Enter. S applies the draft, then S in Action Builder saves atomically. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait. Parallel and conditional execution are not yet included.
+Choose **workflow** in the Action Builder, select Steps and press Enter. Add with A, delete with D, select with J/K, reorder with Ctrl+arrow, change type with left/right, choose a preset with P and edit the selected step with Enter. S applies the draft, then S in Action Builder saves atomically. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait. Parallel and conditional blocks are also supported. Select their type in the editor and edit the JSON block with Enter.
 
 ```yaml
 actions:
@@ -492,3 +492,11 @@ In safe preview, watch Activity for **Possible soft tap** events: a sharp onset 
 ### Personalized soft-tap calibration (opt-in)
 
 In Settings press **g** to select Personalized, then **c** to calibrate again. During the work phase type, speak and click as you normally do; during the tap phase make at least six separated soft and normal desk knocks. This mode fits a weak-tap reference from distinct sharp, short impacts and uses the maximum observed work-noise level plus a 4 dB margin as a hard floor. It refuses to save if fewer than six clean impacts are recognized or their energy overlaps work noise. Switching the setting alone does not alter saved thresholds until you recalibrate. Use safe preview and a new work-noise audit before arming. No raw audio is retained, and synthetic tests are not a hardware accuracy guarantee.
+
+### Parallel and conditional blocks
+
+Parallel blocks run 2–4 independent actions concurrently, then wait for dispatch completion before proceeding. Keyboard chords are deliberately excluded from parallel blocks. Conditional blocks evaluate local tool availability, Hyprland session, media playback or mute state, then execute one branch. Both branches are validated before any action runs; a failed state query aborts rather than guessing. Blocks cannot nest, and the 20-step / 30-second wait limits cover all branches. Existing spawned applications cannot be undone.
+
+```json
+[{"type":"if","value":{"condition":{"type":"microphone_muted"},"then":[{"type":"builtin","value":"audio.mic_toggle"}],"else":[]}},{"type":"parallel","value":[{"type":"exec","value":"xdg-open ."},{"type":"exec","value":"foot"}]}]
+```

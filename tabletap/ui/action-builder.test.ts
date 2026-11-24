@@ -56,3 +56,9 @@ test("launcher presets use actual named profiles, never the default map", () => 
   expect(presetsFor("launcher")).toEqual([])
   expect(validateActionDraft({name:"Menu", type:"launcher", value:"default"})).toMatch(/named action profile/)
 })
+
+
+test("advanced blocks validate and reject invalid branches", () => {
+  expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([defaultStep("parallel"), defaultStep("if")])})).toBeNull()
+  expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([{type:"parallel",value:[{type:"key",value:"ctrl+a"},{type:"exec",value:"true"}]}])})).toMatch(/Keyboard/)
+})

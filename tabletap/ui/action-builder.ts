@@ -55,31 +55,54 @@ export function validateActionDraft(draft: ActionDraft): string | null {
   return null
 }
 
+export const STEP_TYPES = ["builtin", "exec", "key", "script", "wait", "parallel", "if"] as const
+export type StepType = typeof STEP_TYPES[number]
+export type WorkflowStep = { type: StepType; value: string | number | WorkflowStep[] | ConditionalBlock }
+type ConditionalBlock = { condition: { type: string; value?: string }; then: WorkflowStep[]; else: WorkflowStep[] }
+
 export function validateWorkflow(value: string): string | null {
   if (value.length > 8192) return "Workflow exceeds 8192 characters"
   let steps: unknown
   try { steps = JSON.parse(value) } catch { return "Workflow must be a JSON array of steps" }
   if (!Array.isArray(steps) || steps.length < 1 || steps.length > 20) return "Workflow requires 1–20 steps"
-  let wait = 0
-  for (const [index, step] of steps.entries()) {
-    if (!step || typeof step !== "object" || Object.keys(step).sort().join(",") !== "type,value") return "Invalid step " + (index + 1)
+  let wait = 0, count = 0
+  const validate = (step: any, nested = false, parallel = false): string | null => {
+    if (++count > 20) return "Workflow requires at most 20 total steps, including blocks"
+    if (!step || typeof step !== "object" || Object.keys(step).sort().join(",") !== "type,value") return "Invalid step"
     if (step.type === "wait") {
       if (typeof step.value !== "number" || !Number.isFinite(step.value) || step.value < 0 || step.value > 10000) return "Wait must be 0–10000 milliseconds"
       wait += step.value
     } else if (["exec","key","script","builtin"].includes(step.type)) {
-      if (typeof step.value !== "string" || !step.value.trim() || step.value.length > 1024 || /[\r\n\x00]/.test(step.value)) return "Invalid action value at step " + (index + 1)
-      if (step.type === "builtin" && !NATIVE_ACTIONS.some(item => item.id === step.value)) return "Unknown built-in at step " + (index + 1)
+      if (typeof step.value !== "string" || !step.value.trim() || step.value.length > 1024 || /[\r\n\x00]/.test(step.value)) return "Invalid action value"
+      if (step.type === "builtin" && !NATIVE_ACTIONS.some(item => item.id === step.value)) return "Unknown built-in"
+      if (parallel && step.type === "key") return "Keyboard shortcuts cannot run in parallel"
+    } else if (!nested && step.type === "parallel") {
+      if (!Array.isArray(step.value) || step.value.length < 2 || step.value.length > 4) return "Parallel requires 2–4 independent actions"
+      for (const child of step.value) { const issue = validate(child, true, true); if (issue) return issue }
+    } else if (!nested && step.type === "if") {
+      const block = step.value
+      if (!block || typeof block !== "object" || Object.keys(block).sort().join(",") !== "condition,else,then") return "Invalid condition block"
+      const c = block.condition
+      if (!c || typeof c !== "object" || !["tool_available","hyprland","media_playing","microphone_muted","speakers_muted"].includes(c.type)) return "Unsupported condition"
+      if (c.type === "tool_available") {
+        if (Object.keys(c).sort().join(",") !== "type,value" || typeof c.value !== "string" || !/^[A-Za-z0-9_.+-]{1,100}$/.test(c.value)) return "Invalid tool name"
+      } else if (Object.keys(c).join(",") !== "type") return "Unexpected condition value"
+      for (const branch of ["then","else"]) {
+        const list = block[branch]
+        if (!Array.isArray(list) || list.length > 4 || (branch === "then" && !list.length)) return "Invalid " + branch + " branch"
+        for (const child of list) { const issue = validate(child, true); if (issue) return issue }
+      }
     } else return "Unsupported step type"
+    return null
   }
+  for (const step of steps) { const issue = validate(step); if (issue) return issue }
   return wait > 30000 ? "Total workflow wait must not exceed 30 seconds" : null
 }
 
-export const STEP_TYPES = ["builtin", "exec", "key", "script", "wait"] as const
-export type StepType = typeof STEP_TYPES[number]
-export type WorkflowStep = { type: StepType; value: string | number }
-
 export function defaultStep(type: StepType): WorkflowStep {
   if (type === "wait") return {type, value: 500}
+  if (type === "parallel") return {type, value: [{type:"exec",value:"xdg-open ."},{type:"exec",value:"xdg-open https://example.com"}]}
+  if (type === "if") return {type, value: {condition:{type:"tool_available",value:"playerctl"},then:[{type:"builtin",value:"media.play_pause"}],else:[]}}
   return {type, value: presetsFor(type)[0]?.value || ""}
 }
 
@@ -101,6 +124,8 @@ export function moveStep(steps: WorkflowStep[], index: number, offset: number): 
 
 export function stepLabel(step: WorkflowStep): string {
   if (step.type === "wait") return `Wait ${step.value} ms`
+  if (step.type === "parallel") return "Parallel · " + (step.value as WorkflowStep[]).length + " actions"
+  if (step.type === "if") return "If · " + (step.value as ConditionalBlock).condition.type
   if (step.type === "builtin") return NATIVE_ACTIONS.find(item => item.id === step.value)?.label || String(step.value)
   return step.type + " · " + step.value
 }

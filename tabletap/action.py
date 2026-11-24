@@ -6,10 +6,10 @@ import logging
 import threading
 import time
 from typing import Any
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .native_actions import execute_native
-from .workflow import parse_workflow
+from .workflow import parse_workflow, evaluate_condition
 from .launcher import profile_menu, choose_action
 
 try:
@@ -194,20 +194,45 @@ class ActionRunner:
             for index, step in enumerate(steps, 1):
                 self._check_authorized()
                 try:
-                    if step["type"] == "wait":
-                        end = time.monotonic() + step["value"] / 1000
-                        while True:
-                            self._check_authorized()
-                            remaining = end - time.monotonic()
-                            if remaining <= 0:
-                                break
-                            self._cancelled.wait(min(remaining, 0.1))
-                    else:
-                        self._execute_action(step)
+                    self._run_step(step)
                 except Exception as exc:
                     raise RuntimeError(f"Workflow step {index} failed: {exc}") from exc
         finally:
             self._workflow_lock.release()
+
+    def _run_step(self, step, group_cancel=None):
+        self._check_authorized()
+        if group_cancel is not None and group_cancel.is_set():
+            raise RuntimeError("Parallel block cancelled")
+        kind, value = step["type"], step["value"]
+        if kind == "wait":
+            end = time.monotonic() + value / 1000
+            while True:
+                self._check_authorized()
+                if group_cancel is not None and group_cancel.is_set():
+                    raise RuntimeError("Parallel block cancelled")
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cancelled.wait(min(remaining, 0.05))
+        elif kind == "if":
+            branch = "then" if evaluate_condition(value["condition"]) else "else"
+            for child in value[branch]:
+                self._run_step(child)
+        elif kind == "parallel":
+            cancelled = threading.Event()
+            with ThreadPoolExecutor(max_workers=len(value), thread_name_prefix="workflow") as pool:
+                futures = [pool.submit(self._run_step, child, cancelled) for child in value]
+                try:
+                    for future in as_completed(futures):
+                        future.result()
+                except Exception:
+                    cancelled.set()
+                    for future in futures:
+                        future.cancel()
+                    raise
+        else:
+            self._execute_action(step)
 
     def _press_key(self, combo: str):
         parts = combo.lower().split("+")
