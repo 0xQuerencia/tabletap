@@ -161,7 +161,10 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 if not spike:
                     handle(pattern.on_silence())
                 if impact.rejected_reason and impact.rejected_reason != "echo / too close":
-                    emit("rejected", reason=impact.rejected_reason)
+                    emit("rejected", reason=impact.rejected_reason,
+                         db=round(db, 1), threshold_db=round(limit, 1))
+                if impact.near_miss is not None:
+                    emit("near_miss", **impact.near_miss)
                 threshold.update(db, spike)
                 handle(pattern.check_window_timeout())
                 if now - last_level_at >= 0.1:

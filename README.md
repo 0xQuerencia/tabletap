@@ -456,3 +456,7 @@ the builder is read-only and cannot save changes. The palette command
 `/builder` opens the builder for the selected action.
 
 The default three-tap map and hardware detection remain unchanged.
+
+### Missed-tap diagnostics
+
+In safe preview, watch Activity for **Possible soft tap** events: a sharp onset within 6 dB below the current threshold. These are candidates, not confirmed taps, and never execute actions. Rejected-noise entries also show the measured level and threshold. If deliberate taps repeatedly appear here, recalibrate and include your normal softer taps; run the work-noise audit before arming. No raw audio is stored and the detection decisions are unchanged.

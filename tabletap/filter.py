@@ -118,11 +118,14 @@ class ImpactDetector:
         self._last_accepted_at = float("-inf")
         self._armed = True
         self.rejected_reason = None
+        self.near_miss = None
+        self._last_near_miss = float("-inf")
         self._noise_block_until = float("-inf")
 
     def feed(self, db: float, threshold_db: float, now: float,
              broadband: bool = False) -> bool:
         self.rejected_reason = None
+        self.near_miss = None
         rise = 0.0 if self._previous_db is None else db - self._previous_db
         self._previous_db = db
         if broadband:
@@ -154,6 +157,15 @@ class ImpactDetector:
             return True
 
         if not active:
+            if (self._armed and rise >= self.min_attack_db
+                    and 0 <= threshold_db - db <= 6
+                    and now - self._last_near_miss >= self.min_gap):
+                self.near_miss = {
+                    "db": round(db, 1),
+                    "threshold_db": round(threshold_db, 1),
+                    "attack_db": round(rise, 1),
+                }
+                self._last_near_miss = now
             self._armed = True
         elif self._armed:
             self._armed = False

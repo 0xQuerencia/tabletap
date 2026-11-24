@@ -30,7 +30,8 @@ type BridgeMessage =
   | { type: "action_result"; pattern: string; status: "launched" | "failed"; message: string }
   | { type: "error"; message: string }
   | { type: "stopped" }
-  | { type: "rejected"; reason: string }
+  | { type: "rejected"; reason: string; db?: number; threshold_db?: number }
+  | { type: "near_miss"; db: number; threshold_db: number; attack_db: number }
   | { type: "live_expired"; message: string }
 
 const [activeTheme, setActiveTheme] = createSignal<PaletteName>("midnight")
@@ -280,9 +281,11 @@ function App() {
       addLog("Python bridge expired live authorization; switching to preview")
       setNotice("LIVE ACTIONS EXPIRED · restarting safe preview")
       void startBridge(true)
+    } else if (m.type === "near_miss") {
+      addLog(`Possible soft tap: ${m.db} dB (${m.threshold_db} dB threshold) · preview and recalibrate if intentional`)
     } else if (m.type === "rejected") {
       setRejected((v) => v + 1)
-      if (rejected() % 10 === 1) addLog("Ignored noise: " + m.reason)
+      if (rejected() % 10 === 1) addLog("Ignored noise: " + m.reason + (m.db === undefined ? "" : ` · ${m.db} dB / limit ${m.threshold_db} dB`))
     } else if (m.type === "error") {
       setSafety(SAFE_ARM, false)
       setState("ERROR")
