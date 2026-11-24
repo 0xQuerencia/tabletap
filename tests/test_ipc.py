@@ -62,3 +62,14 @@ def test_reload_supersedes_pending_arm_and_stop_cannot_be_overridden(tmp_path):
         assert hub.request({"command":"stop"})["accepted"]
         assert "error" in hub.request({"command":"reload","category":None})
         assert hub.take_request()["command"] == "stop"
+
+
+def test_transition_snapshot_cannot_be_replaced_by_stale_ready(tmp_path):
+    hub = ControlHub(tmp_path / "engine.sock")
+    hub.publish("ready", dry_run=True, category="default", threshold_db=-30)
+    assert hub.request({"command":"arm","seconds":5})["accepted"]
+    hub.publish("ready", dry_run=True, category="default", threshold_db=-30)
+    assert hub.request({"command":"status"})["state"]["type"] == "transition"
+    hub.take_request()
+    hub.publish("ready", dry_run=False, category="default", threshold_db=-30)
+    assert hub.request({"command":"status"})["state"]["dry_run"] is False

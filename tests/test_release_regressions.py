@@ -38,6 +38,7 @@ def test_calibration_disconnect_is_machine_readable(capsys):
     cfg = {"audio": {}, "filter": {}}
     with patch("tabletap.bridge.load_config", return_value=cfg), \
          patch("tabletap.bridge.PIDLock") as lock, \
+         patch("tabletap.bridge.device_identity", return_value="fake-device"), \
          patch("tabletap.calibrate.calibrate", side_effect=MicDisconnected("USB mic removed")):
         lock.return_value.acquire.return_value = True
         result = run_calibration(config_path="/synthetic")
@@ -82,3 +83,16 @@ def test_cached_ui_includes_native_catalog(tmp_path, monkeypatch):
     cache = _prepare_ui()
     actions = json.loads((cache / "native-actions.json").read_text())
     assert any(item["id"] == "audio.mic_toggle" for item in actions)
+
+
+def test_cli_init_and_preview_dispatch(tmp_path, monkeypatch):
+    import sys
+    from tabletap.__main__ import main, preview_cmd
+    target = tmp_path / "new.yaml"
+    monkeypatch.setattr(sys, "argv", ["tabletap","init","--path",str(target)])
+    main()
+    assert target.exists()
+    with patch("tabletap.bridge.run_bridge", return_value=0) as bridge:
+        assert preview_cmd(str(target), 5) == 0
+    assert bridge.call_args.kwargs["dry_run"] is True
+    assert bridge.call_args.kwargs["duration"] == 5

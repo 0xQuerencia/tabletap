@@ -174,6 +174,8 @@ class ControlHub:
             if command == "arm" and (self.last_state.get("type") != "ready" or not self.last_state.get("dry_run")):
                 return {"error":"Start safe preview before arming"}
             self.pending = request
+            self.last_state = {"type":"transition", "message":"Applying " + command}
+            self.last_level = None
             self.interrupted.set()
             if self.runner is not None:
                 self.runner.cancel()
@@ -195,6 +197,8 @@ class ControlHub:
         record = {"type":kind, **fields}
         data = encode(record)
         with self.guard:
+            if kind in ("ready", "level") and self.interrupted.is_set():
+                return  # Do not expose a stale ready snapshot during an accepted transition.
             if kind in ("ready", "transition", "error", "stopped"):
                 self.last_state = record
                 if kind != "ready":

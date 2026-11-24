@@ -41,13 +41,15 @@ def emit(kind: str, **fields) -> None:
         sys.stdout.flush()
 
 
-def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None, *, control=None, held_lock=None) -> int:
+def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None, *, control=None, held_lock=None, event_sink=None, duration=None) -> int:
     """Listen continuously, report live levels/gestures, and execute mapped actions.
 
     A lock prevents a TUI bridge from racing the old systemd daemon.
     """
     def report(kind, **fields):
-        if control is None:
+        if event_sink is not None:
+            event_sink(kind, **fields)
+        elif control is None:
             emit(kind, **fields)
         else:
             control.publish(kind, **fields)
@@ -59,6 +61,9 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
         cfg = load_config(config_path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
         report("error", message=f"Cannot load TableTap config: {exc}")
+        return 2
+    if duration is not None and (not dry_run or not 0 < duration <= 600):
+        report("error", message="Preview duration must be between 0 and 600 seconds")
         return 2
     if live_seconds is not None:
         if dry_run or not 0 < live_seconds <= 600:
@@ -162,9 +167,12 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
             last_level_at = 0.0
             deadline = time.monotonic() + live_seconds if live_seconds is not None else None
             runner.deadline = deadline
+            preview_end = time.monotonic() + duration if duration is not None else None
             while running and not (control is not None and control.interrupted.is_set()):
                 # Enforced inside the Python action-capable process, even if
                 # the terminal UI freezes or its timer never gets CPU time.
+                if preview_end is not None and time.monotonic() >= preview_end:
+                    break
                 if deadline is not None and time.monotonic() >= deadline:
                     report("live_expired", message="Live action authorization expired")
                     break
@@ -266,9 +274,10 @@ def run_calibration(config_path=None) -> int:
     try:
         # calibrate() includes human-readable prompts for the old CLI. Keep
         # them on stderr so stdout remains a JSONL-only protocol for OpenTUI.
+        identity = device_identity(cfg)
         with redirect_stdout(sys.stderr):
             result = calibrate(cfg, progress=progress)
-        save_calibration(cfg, result, config_path, identity=device_identity(cfg))
+        save_calibration(cfg, result, config_path, identity=identity)
         print(json.dumps({"type": "calibration_done", **result}),
               file=output, flush=True)
         return 0
