@@ -506,3 +506,14 @@ Parallel blocks run 2–4 independent actions concurrently, then wait for dispat
 Use `/acoustic use desk-name` in the TUI (or `tabletap acoustic use desk-name` in a stopped session), then calibrate. Each named desk stores separate settings for each microphone identity and capture/filter configuration. Switching microphones in Settings loads the matching profile or requires new calibration before live actions. Unplugged/changed devices must be recalibrated; identical device names may not be distinguishable.
 
 In safe preview, open Activity and label the latest confirmed impact or possible missed tap with **T** (intentional tap) or **N** (noise). This saves only its level and label, stops listening, and does not change detection. Repeat to collect at least three missed taps or three false detections. Use `/acoustic propose` to inspect a bounded threshold adjustment and `/acoustic apply` to save it; the previous threshold is recoverable via `/acoustic rollback`. Test in preview and repeat the work-noise audit. Ambiguous labels are rejected rather than lowering the work-noise floor. No raw audio is saved. This is threshold feedback, not a source-separating speech model.
+
+### Optional integrations
+
+Browse built-ins in Action Builder, choose a preset, and edit its argument if needed. `tabletap actions` lists IDs and locally available dependencies. All integrations remain optional.
+
+- **OBS:** Install `pip install 'tabletap[obs]'`, enable OBS WebSocket v5 on loopback and set `TABLETAP_OBS_PASSWORD` if authentication is enabled (optional `TABLETAP_OBS_PORT`, default 4455). Use `obs.record_toggle`, `obs.scene:Your Scene`, or `obs.input_mute:Mic/Aux`.
+- **Home Assistant:** Set `TABLETAP_HA_URL` to the instance base URL and `TABLETAP_HA_TOKEN` to a user-owned token in the process environment. HTTPS is required except loopback or explicit `TABLETAP_HA_ALLOW_HTTP=1` for a trusted LAN. Use `home.light_toggle:light.desk`, `home.switch_toggle:switch.desk`, `home.scene:scene.focus`. No redirect following, and no access to locks or alarms. The token is not saved in action YAML.
+- **Discord:** Configure your own mute/deafen keybind in Discord first and use `discord.mute:ctrl+shift+m` / `discord.deafen:ctrl+shift+d` (examples only). Whether global shortcuts work depends on your desktop; no user token, self-bot or client injection is used.
+- **KDE / GNOME:** KRunner, KDE Show Desktop via its global shortcut D-Bus service, GNOME workspace and overview shortcuts. These depend on the desktop and configured keyboard backend.
+- **VS Code:** Focus the editor before using the build, quick open and command palette shortcut actions; they are not application automation APIs.
+- **X:** `x.dictation_toggle` uses the X project's documented `x dictation toggle` command; `x.stop` stops its current agent task. The `x` executable must be installed.

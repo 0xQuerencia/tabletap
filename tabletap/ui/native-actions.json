@@ -117,5 +117,155 @@
       "workspace",
       "e-1"
     ]
+  },
+  {
+    "id": "x.dictation_toggle",
+    "label": "X · toggle dictation",
+    "argv": [
+      "x",
+      "dictation",
+      "toggle"
+    ]
+  },
+  {
+    "id": "x.stop",
+    "label": "X · stop task",
+    "argv": [
+      "x",
+      "agent",
+      "stop"
+    ]
+  },
+  {
+    "id": "gnome.apps",
+    "label": "GNOME · application overview",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+a"
+  },
+  {
+    "id": "gnome.workspace_next",
+    "label": "GNOME · next workspace",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+pagedown"
+  },
+  {
+    "id": "gnome.workspace_previous",
+    "label": "GNOME · previous workspace",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+pageup"
+  },
+  {
+    "id": "kde.show_desktop",
+    "label": "KDE · show desktop",
+    "desktop": "kde",
+    "argv": [
+      "busctl",
+      "--user",
+      "call",
+      "org.kde.kglobalaccel",
+      "/component/kwin",
+      "org.kde.kglobalaccel.Component",
+      "invokeShortcut",
+      "s",
+      "Show Desktop"
+    ]
+  },
+  {
+    "id": "kde.krunner",
+    "label": "KDE · open KRunner",
+    "desktop": "kde",
+    "argv": [
+      "krunner"
+    ]
+  },
+  {
+    "id": "discord.mute",
+    "label": "Discord · configured mute keybind",
+    "adapter": "key",
+    "parameter": "shortcut",
+    "example": "ctrl+shift+m"
+  },
+  {
+    "id": "discord.deafen",
+    "label": "Discord · configured deafen keybind",
+    "adapter": "key",
+    "parameter": "shortcut",
+    "example": "ctrl+shift+d"
+  },
+  {
+    "id": "vscode.build",
+    "label": "VS Code · run build (focused)",
+    "adapter": "key",
+    "shortcut": "ctrl+shift+b"
+  },
+  {
+    "id": "vscode.palette",
+    "label": "VS Code · command palette (focused)",
+    "adapter": "key",
+    "shortcut": "ctrl+shift+p"
+  },
+  {
+    "id": "vscode.quick_open",
+    "label": "VS Code · quick open (focused)",
+    "adapter": "key",
+    "shortcut": "ctrl+p"
+  },
+  {
+    "id": "obs.record_toggle",
+    "label": "OBS · toggle recording",
+    "adapter": "obs"
+  },
+  {
+    "id": "obs.scene",
+    "label": "OBS · switch scene",
+    "adapter": "obs",
+    "parameter": "name",
+    "example": "Scene"
+  },
+  {
+    "id": "obs.input_mute",
+    "label": "OBS · toggle input mute",
+    "adapter": "obs",
+    "parameter": "name",
+    "example": "Mic/Aux"
+  },
+  {
+    "id": "home.light_toggle",
+    "label": "Home Assistant · toggle light",
+    "adapter": "home",
+    "parameter": "light",
+    "example": "light.desk"
+  },
+  {
+    "id": "home.switch_toggle",
+    "label": "Home Assistant · toggle switch",
+    "adapter": "home",
+    "parameter": "switch",
+    "example": "switch.desk"
+  },
+  {
+    "id": "home.scene",
+    "label": "Home Assistant · activate scene",
+    "adapter": "home",
+    "parameter": "scene",
+    "example": "scene.focus"
+  },
+  {
+    "id": "files.home",
+    "label": "Open home folder",
+    "argv": [
+      "xdg-open",
+      "~"
+    ]
+  },
+  {
+    "id": "notify",
+    "label": "Show notification",
+    "adapter": "notify",
+    "parameter": "name",
+    "example": "TableTap"
   }
 ]

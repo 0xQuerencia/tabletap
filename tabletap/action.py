@@ -158,7 +158,7 @@ class ActionRunner:
         elif action_type == "script":
             self._run_script(value)
         elif action_type == "builtin":
-            execute_native(value)
+            execute_native(value, press_key=self._press_key)
         elif action_type == "workflow":
             self._run_workflow(value)
         elif action_type == "launcher":

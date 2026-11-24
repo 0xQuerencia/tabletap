@@ -182,6 +182,7 @@ def main():
 
     sub.add_parser("status", help="Show current config and device info")
     sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
+    sub.add_parser("actions", help="List built-in actions and local capability checks")
     sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
     service_p = sub.add_parser("service", help="Manage optional background systemd user-service integration")
     service_p.add_argument("service_action", choices=("install", "uninstall", "path"))
@@ -213,6 +214,12 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "actions":
+        import json
+        from .native_actions import action_catalog
+        print(json.dumps(action_catalog(), indent=2))
+        return
 
     if args.command == "acoustic":
         import json
@@ -323,6 +330,9 @@ def main():
             keytool = shutil.which("xdotool")
             missing = "MISSING (install xdotool)"
         print("  Key tool: " + (keytool or missing))
+        from .native_actions import action_catalog
+        catalog = action_catalog()
+        print(f"  Built-in actions available: {sum(not item['unavailable'] for item in catalog)}/{len(catalog)} (tabletap actions)")
         try:
             from .mic import pyaudio
             if pyaudio is None:

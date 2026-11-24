@@ -5,7 +5,7 @@ import re
 import shutil
 import subprocess
 
-from .native_actions import CATALOG
+from .native_actions import validate_builtin
 
 LEAF_TYPES = ("key", "exec", "script", "builtin", "wait")
 CONDITIONS = ("tool_available", "hyprland", "media_playing", "microphone_muted", "speakers_muted")
@@ -38,8 +38,13 @@ def parse_workflow(value: str) -> list[dict]:
         elif kind in ("key", "exec", "script", "builtin"):
             if not isinstance(arg, str) or not arg.strip() or len(arg) > 1024 or any(c in arg for c in "\r\n\x00"):
                 raise ValueError(f"Step {path}: invalid action value")
-            if kind == "builtin" and arg not in CATALOG:
-                raise ValueError(f"Step {path}: unknown built-in action")
+            if kind == "builtin":
+                try:
+                    item, _ = validate_builtin(arg)
+                except ValueError as exc:
+                    raise ValueError(f"Step {path}: {exc}") from exc
+                if parallel and item.get("adapter") == "key":
+                    raise ValueError(f"Step {path}: keyboard actions cannot run in parallel")
             if parallel and kind == "key":
                 raise ValueError(f"Step {path}: keyboard shortcuts cannot run in parallel")
         elif not nested and kind == "parallel":

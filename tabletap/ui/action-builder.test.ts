@@ -62,3 +62,12 @@ test("advanced blocks validate and reject invalid branches", () => {
   expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([defaultStep("parallel"), defaultStep("if")])})).toBeNull()
   expect(validateActionDraft({name:"Block",type:"workflow",value:JSON.stringify([{type:"parallel",value:[{type:"key",value:"ctrl+a"},{type:"exec",value:"true"}]}])})).toMatch(/Keyboard/)
 })
+
+
+test("parameterized integrations validate entity IDs and explicit shortcuts", () => {
+  const a = {name:"Integration",type:"builtin" as const}
+  expect(validateActionDraft({...a,value:"home.light_toggle:light.desk"})).toBeNull()
+  expect(validateActionDraft({...a,value:"home.light_toggle:lock.door"})).toMatch(/entity ID/)
+  expect(validateActionDraft({...a,value:"discord.mute:ctrl+shift+m"})).toBeNull()
+  expect(validateActionDraft({...a,value:"obs.scene"})).toMatch(/parameter/)
+})

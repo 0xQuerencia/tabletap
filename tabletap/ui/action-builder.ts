@@ -1,7 +1,7 @@
 /** Pure action-draft operations; presets are examples, never executed here. */
 import { readFileSync } from "node:fs"
 
-const NATIVE_ACTIONS: { id: string; label: string; argv: string[] }[] = JSON.parse(
+const NATIVE_ACTIONS: { id: string; label: string; argv?: string[]; parameter?: string; example?: string; adapter?: string }[] = JSON.parse(
   readFileSync(new URL("./native-actions.json", import.meta.url), "utf8"),
 )
 export const ACTION_TYPES = ["exec", "key", "script", "builtin", "workflow", "launcher"] as const
@@ -11,7 +11,7 @@ export type ActionPreset = ActionDraft & { label: string }
 
 export const ACTION_PRESETS: readonly ActionPreset[] = [
   { label: "Open files then pause media", name: "Files and media", type: "workflow", value: JSON.stringify([{type:"exec",value:"xdg-open ."},{type:"wait",value:500},{type:"builtin",value:"media.play_pause"}]) },
-  ...NATIVE_ACTIONS.map((item): ActionPreset => ({ label: item.label, name: item.label, type: "builtin", value: item.id })),
+  ...NATIVE_ACTIONS.map((item): ActionPreset => ({ label: item.label, name: item.label, type: "builtin", value: item.parameter ? item.id + ":" + item.example : item.id })),
   { label: "Open URL", name: "Open website", type: "exec", value: "xdg-open https://example.com" },
   { label: "File manager", name: "Open files", type: "exec", value: "xdg-open ." },
   { label: "Terminal (example)", name: "Open terminal", type: "exec", value: "foot" },
@@ -39,6 +39,20 @@ export function normalizeActionDraft(action: {
   }
 }
 
+function builtinProblem(value: string, parallel = false): string | null {
+  const split = value.indexOf(":")
+  const id = split < 0 ? value : value.slice(0, split)
+  const arg = split < 0 ? "" : value.slice(split + 1)
+  const item = NATIVE_ACTIONS.find(x => x.id === id)
+  if (!item) return "Choose a known built-in action"
+  if (parallel && item.adapter === "key") return "Keyboard actions cannot run in parallel"
+  if (!item.parameter) return split < 0 ? null : "Action does not accept a parameter"
+  if (!arg.trim() || arg.length > 100 || /[\x00-\x1f\x7f]/.test(arg)) return "Enter a " + item.parameter + " parameter"
+  if (item.parameter === "shortcut" && !/^[a-z0-9_]+(\+[a-z0-9_]+)*$/i.test(arg)) return "Invalid configured shortcut"
+  if (["light","switch","scene"].includes(item.parameter) && !new RegExp("^" + item.parameter + "\\.[a-z0-9_]+$").test(arg)) return "Expected a " + item.parameter + " entity ID"
+  return null
+}
+
 export function validateActionDraft(draft: ActionDraft): string | null {
   if (!ACTION_TYPES.includes(draft.type)) return "Choose a supported action type"
   if (!draft.name.trim()) return "Enter a name for this action"
@@ -48,7 +62,7 @@ export function validateActionDraft(draft: ActionDraft): string | null {
   if (draft.type === "workflow") return validateWorkflow(value)
   if (draft.type === "launcher" && (value === "default" || value.length > 100 || /[\r\n\x00-\x1f]/.test(value))) return "Choose a named action profile"
   if (value.length > 1024 || /[\r\n\x00]/.test(value)) return "Command must be a single line under 1024 characters"
-  if (draft.type === "builtin" && !NATIVE_ACTIONS.some((item) => item.id === value)) return "Choose a known built-in action"
+  if (draft.type === "builtin") return builtinProblem(value)
   if (draft.type === "key" && !/^[a-z0-9_]+(\+[a-z0-9_]+)*$/i.test(value)) {
     return "Shortcuts use tokens joined by + (example: ctrl+shift+t)"
   }
@@ -74,7 +88,7 @@ export function validateWorkflow(value: string): string | null {
       wait += step.value
     } else if (["exec","key","script","builtin"].includes(step.type)) {
       if (typeof step.value !== "string" || !step.value.trim() || step.value.length > 1024 || /[\r\n\x00]/.test(step.value)) return "Invalid action value"
-      if (step.type === "builtin" && !NATIVE_ACTIONS.some(item => item.id === step.value)) return "Unknown built-in"
+      if (step.type === "builtin") { const issue = builtinProblem(step.value, parallel); if (issue) return issue }
       if (parallel && step.type === "key") return "Keyboard shortcuts cannot run in parallel"
     } else if (!nested && step.type === "parallel") {
       if (!Array.isArray(step.value) || step.value.length < 2 || step.value.length > 4) return "Parallel requires 2–4 independent actions"
@@ -126,6 +140,6 @@ export function stepLabel(step: WorkflowStep): string {
   if (step.type === "wait") return `Wait ${step.value} ms`
   if (step.type === "parallel") return "Parallel · " + (step.value as WorkflowStep[]).length + " actions"
   if (step.type === "if") return "If · " + (step.value as ConditionalBlock).condition.type
-  if (step.type === "builtin") return NATIVE_ACTIONS.find(item => item.id === step.value)?.label || String(step.value)
+  if (step.type === "builtin") return NATIVE_ACTIONS.find(item => item.id === String(step.value).split(":")[0])?.label || String(step.value)
   return step.type + " · " + step.value
 }
