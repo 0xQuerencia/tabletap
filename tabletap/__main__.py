@@ -103,6 +103,8 @@ def main():
     acoustic_p.add_argument("--label", choices=("tap", "noise"))
     acoustic_p.add_argument("--db", type=float)
     acoustic_p.add_argument("--accepted", action="store_true")
+    desktop_p = sub.add_parser("desktop", help="Launch native graphical TableTap")
+    desktop_p.add_argument("--demo", action="store_true", help="Preview the desktop without microphone access")
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
@@ -274,6 +276,15 @@ def main():
         except Exception as exc:
             print("  Microphone: unavailable: " + str(exc))
         return
+
+    if args.command == "desktop":
+        try:
+            from .desktop import run_desktop
+            sys.exit(run_desktop(args.demo))
+        except (ImportError, ValueError) as exc:
+            print("[tabletap] Desktop needs GTK4 and PyGObject. On Arch: sudo pacman -S gtk4 python-gobject", file=sys.stderr)
+            print("Use a virtual environment with --system-site-packages. " + str(exc), file=sys.stderr)
+            sys.exit(1)
 
     if args.command == "tui":
         bun = shutil.which("bun")
