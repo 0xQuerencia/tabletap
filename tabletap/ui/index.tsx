@@ -1109,7 +1109,7 @@ function App() {
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
-        <text fg={theme.dim}>{narrow() ? "v0.7.0" : "acoustic shortcuts  /  v0.7.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}{attached() ? " · SERVICE" : ""}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v1.0.0rc1" : "acoustic shortcuts  /  v1.0.0rc1"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}{attached() ? " · SERVICE" : ""}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>

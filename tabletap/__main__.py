@@ -411,6 +411,7 @@ def main():
         init_config()
         env = os.environ.copy()
         env["TABLETAP_PYTHON"] = sys.executable
+        env["TABLETAP_VERSION"] = __version__
         cmd = [bun, "run", str(ui)]
         if args.demo:
             cmd.append("--demo")

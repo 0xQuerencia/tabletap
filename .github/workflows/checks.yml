@@ -5,6 +5,7 @@ on:
     branches:
       - main
   workflow_dispatch:
+  workflow_call:
 
 # Each new PR revision supersedes earlier checks; don't generate failures
 # and notification emails for obsolete in-progress commits.

@@ -124,9 +124,10 @@ systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS
 systemctl --user enable --now tabletap.service
 ```
 
-This mode **executes configured actions** instead of running the TUI's
-safe-preview mode, so review your mappings before enabling it. Stop the
-service before starting the TUI: `systemctl --user stop tabletap.service`.
+The service starts in **safe preview** by default. Open the TUI to attach to
+that listener, see its status and explicitly authorize actions. Use
+`tabletap service install --live` only if you deliberately want persistent
+live actions after a clean calibration and work-noise audit.
 To retire it, run `systemctl --user disable --now tabletap.service`, then
 `.venv/bin/tabletap service uninstall` and
 `systemctl --user daemon-reload`. The obsolete checked-in
@@ -141,13 +142,15 @@ has been replaced by this portable installer.
 .venv/bin/tabletap start         # start listening (headless)
 ```
 
-The interactive TUI starts in a safe stopped state. Press `c` for guided calibration; `tabletap start` (headless daemon) auto-calibrates when no saved calibration is present.
+The interactive TUI starts in a safe stopped state or attaches to the existing service. Press `c` for guided calibration. Headless live listening requires saved calibration; use `tabletap start --preview` to listen without execution.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `tabletap start` | Start the daemon (auto-calibrates on first run) |
+| `tabletap start` | Start live headless listener using existing calibration |
+| `tabletap start --preview` | Start safe headless preview |
+| `tabletap control status` | Inspect background service state |
 | `tabletap start --category productivity` | Start with a specific action category |
 | `tabletap calibrate` | Recalibrate noise floor and slam threshold |
 | `tabletap calibrate --no-save` | Dry-run calibration without saving |
@@ -407,7 +410,7 @@ From the command palette: `/arm` then `/confirm`, `/safe` to
 switch to preview, and `/panic` to stop microphone listening.
 
 **Scope:** This guard is for the interactive TUI. Explicitly enabling
-`tabletap start` or the optional always-on systemd user service
+`tabletap start` or the systemd service explicitly installed with `--live`
 runs commands without TUI arming; don't enable that service until your
 work-noise audit is clean.
 
@@ -523,3 +526,34 @@ Browse built-ins in Action Builder, choose a preset, and edit its argument if ne
 `tabletap start --preview` runs the same recognition engine as the TUI and exposes a private Unix socket. The generated systemd service starts in safe preview by default; reinstall it using `tabletap service install --live` only when you explicitly want persistent, calibrated live actions. Use `tabletap control status`, `watch`, `safe`, `arm --seconds 600`, `reload --category media` or `stop`. Reload always disarms; live expiry returns to preview. The control protocol accepts only these commands and no arbitrary action data. Slow subscribers are disconnected without blocking audio. The old independent daemon loop was removed. Initial live mode now requires calibration, rather than auto-calibrating in an unattended background session.
 
 The TUI automatically attaches to a running background service, shows its actual preview/live state, and uses IPC to disarm, authorize, change profiles, and reload config. It does not start a second microphone stream. Opening or quitting the TUI does not implicitly enable actions; if it armed the attached service, quitting requests safe mode. Space, X or /stop stop the attached listener, not just its dashboard. Calibration and acoustic profile changes require exclusive microphone access and stop the service first; restart it when ready. Services using a custom config path can be monitored but not edited using the default-config TUI.
+
+## Action library and profile management
+
+Open Actions with **2** and press **B** or Enter. In the builder press **L**
+or select the preset field and press Enter to search the action library.
+Select an example with Enter, customize it, and press **S** to save. Nothing
+runs in the editor. Use `/profile new study` to create an empty profile,
+`/profile clone study-copy` to duplicate the active profile, or
+`/profile delete study-copy` to remove a named profile. Slots 1–4 correspond
+to tap counts; **A** adds a menu-only slot 5–20, **D** clears a mapping. A
+launcher can reference a named profile; referenced profiles cannot be deleted.
+Use `tabletap actions` for local availability checks.
+
+Portable profiles include only action definitions, not microphone calibration
+or integration credentials. Commands may themselves contain private arguments:
+review the exported JSON before sharing.
+
+```bash
+tabletap profiles export study.json --name study
+tabletap profiles inspect study.json
+# Stop the listener and review every action before explicitly trusting the file.
+tabletap profiles import study.json --name imported-study --trust
+```
+
+## Release candidate
+
+Version 1.0.0rc1 is a release candidate, not a claim of measured recognition
+accuracy. See [release verification](docs/RELEASE_CHECKLIST.md) before a stable
+release. Tagged releases build wheel and source artifacts, run Python and
+terminal checks, and publish a prerelease for RC tags. Linux remains the
+supported platform; optional integrations require their local tools/services.
