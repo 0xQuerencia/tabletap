@@ -28,7 +28,7 @@ def device_identity(cfg: dict, devices=None) -> str:
 
 
 def profile_name(name: str) -> str:
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", name):
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", name):
         raise ValueError("Profile name must be 1–40 letters, digits, underscores or hyphens")
     return name
 

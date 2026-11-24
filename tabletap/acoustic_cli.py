@@ -20,17 +20,20 @@ def acoustic_command(args):
         result = {}
         def mutate(document):
             cal = document.setdefault("calibration", {})
-            identity = profiles.device_identity(document)
             op, value = args.operation, args.value
             if op == "device":
-                if cal.get("device_key") == identity and not cal.get("required"):
-                    profiles.remember(document, identity)
+                try:
+                    previous_identity = profiles.device_identity(document)
+                except ValueError:
+                    previous_identity = None  # unplugged mic must not prevent selecting another
+                if previous_identity and cal.get("device_key") == previous_identity and not cal.get("required"):
+                    profiles.remember(document, previous_identity)
                 document.setdefault("audio", {})["device_index"] = None if value == "default" else int(value)
                 identity = profiles.device_identity(document)
                 found = profiles.select(document, identity, cal.get("active_name", "default"))
                 result["message"] = "Loaded matching calibration" if found else "New microphone: calibrate before live actions"
             elif op == "use":
-                found = profiles.select(document, identity, value)
+                found = profiles.select(document, profiles.device_identity(document), value)
                 result["message"] = "Loaded desk " + value if found else "New desk " + value + ": calibrate first"
             elif op == "feedback":
                 if not args.label or args.db is None:

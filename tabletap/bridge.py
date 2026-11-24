@@ -17,7 +17,7 @@ import yaml
 from .action import ActionRunner
 from .acoustic_profiles import verify_live, device_identity
 from .config import init_config, load_config, DEFAULT_PATHS
-from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
+from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise, effective_threshold
 from .lock import PIDLock
 from .mic import MicCapture, MicDisconnected, rms_db
 from .pattern import PatternDetector
@@ -76,6 +76,9 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     filter_cfg = cfg.get("filter", {})
     detection = cfg.get("detection", {})
     sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
+    managed = bool(cfg.get("calibration", {}).get("device_key"))
+    def limit_db():
+        return effective_threshold(threshold.threshold_db, sensitivity_offset, detection, managed)
 
     if category is not None and category not in cfg.get("actions", {}):
         report("error", message=f"Unknown category: {category}")
@@ -86,6 +89,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
         noise_alpha=filter_cfg.get("noise_alpha", 0.05),
         peak_alpha=filter_cfg.get("peak_alpha", 0.1),
         snr_gate_db=filter_cfg.get("snr_gate_db", 6.0),
+        use_calibrated_floor=managed,
     )
     noise = detection.get("noise_floor_db")
     peak = detection.get("slam_peak_db")
@@ -152,7 +156,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
         with MicCapture(audio, filter_cfg) as mic:
             report(
                 "ready", category=category or "default",
-                dry_run=dry_run, threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
+                dry_run=dry_run, threshold_db=round(limit_db(), 1),
                 **({"config_path":str(__import__("pathlib").Path(config_path or DEFAULT_PATHS[0]).absolute())} if control is not None else {}),
             )
             last_level_at = 0.0
@@ -169,7 +173,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                     break
                 db = float(rms_db(filtered))
                 now = time.monotonic()
-                limit = threshold.threshold_db + sensitivity_offset
+                limit = limit_db()
                 spike = bool(db > limit)
                 broadband = bool(
                     detection.get("broadband_guard", True)
@@ -198,7 +202,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 if now - last_level_at >= 0.1:
                     report(
                         "level", db=round(db, 1),
-                        threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
+                        threshold_db=round(limit_db(), 1),
                         spike=spike,
                     )
                     last_level_at = now
