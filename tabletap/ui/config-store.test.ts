@@ -158,3 +158,10 @@ test("cannot delete a profile referenced by a launcher",()=>{
     expect(()=>deleteActionProfile(path,"media")).toThrow(/launcher/)
   } finally {rmSync(dir,{recursive:true,force:true})}
 })
+
+
+test("old hold mappings are not shown or editable as gestures", () => {
+  const config = {actions:{single:{type:"exec" as const,value:"foot"},long:{type:"exec" as const,value:"old-command"}},detection:{enable_hold_gestures:true}}
+  expect(getActionRows(config,"default").map(([key])=>key)).toEqual(["single","double","triple","quadruple"])
+  expect(()=>actionFieldPath("default","long","value")).toThrow(/Invalid gesture/)
+})

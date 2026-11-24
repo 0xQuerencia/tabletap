@@ -13,7 +13,7 @@ def test_single_tap_timing():
         detector.feed()
         
         mock_time.return_value = 0.16
-        detector.on_silence()
+
         
         mock_time.return_value = 0.85
         event = detector.check_window_timeout()
@@ -31,13 +31,13 @@ def test_double_tap_timing():
         detector.feed()
         
         mock_time.return_value = 0.16
-        detector.on_silence()
+
         
         mock_time.return_value = 0.25
         detector.feed()
         
         mock_time.return_value = 0.41
-        detector.on_silence()
+
         
         mock_time.return_value = 1.1
         event = detector.check_window_timeout()
@@ -55,93 +55,25 @@ def test_triple_tap_timing():
         detector.feed()
         
         mock_time.return_value = 0.16
-        detector.on_silence()
+
         
         mock_time.return_value = 0.2
         detector.feed()
         
         mock_time.return_value = 0.36
-        detector.on_silence()
+
         
         mock_time.return_value = 0.4
         detector.feed()
         
         mock_time.return_value = 0.56
-        detector.on_silence()
+
         
         mock_time.return_value = 1.3
         event = detector.check_window_timeout()
         
         assert event is not None
         assert event.pattern == TapPattern.TRIPLE
-
-
-def test_long_press_detection():
-    detector = PatternDetector(
-        min_gap_ms=100,
-        rhythm_window_ms=800,
-        long_press_ms=500
-    )
-    detector._last_tap_time = -1.0
-    
-    with patch("time.monotonic") as mock_time:
-        mock_time.return_value = 0.0
-        detector.feed()
-        
-        mock_time.return_value = 0.12
-        detector.feed()
-        
-        mock_time.return_value = 0.24
-        detector.feed()
-        
-        mock_time.return_value = 0.90
-        event = detector.on_silence()
-        
-        assert event is not None
-        assert event.pattern == TapPattern.LONG
-
-
-def test_long_press_requires_three_spikes():
-    detector = PatternDetector(
-        min_gap_ms=100,
-        long_press_ms=500
-    )
-    detector._last_tap_time = -1.0
-    
-    with patch("time.monotonic") as mock_time:
-        mock_time.return_value = 0.0
-        detector.feed()
-        
-        mock_time.return_value = 0.15
-        detector.feed()
-        
-        mock_time.return_value = 0.75
-        event = detector.on_silence()
-        
-        assert event is None
-
-
-def test_long_press_requires_silence_debounce():
-    detector = PatternDetector(
-        min_gap_ms=100,
-        long_press_ms=500
-    )
-    detector._last_tap_time = -1.0
-    
-    with patch("time.monotonic") as mock_time:
-        mock_time.return_value = 0.0
-        detector.feed()
-        
-        mock_time.return_value = 0.12
-        detector.feed()
-        
-        mock_time.return_value = 0.24
-        detector.feed()
-        
-        mock_time.return_value = 0.30
-        event = detector.on_silence()
-        
-        assert event is None
 
 
 def test_rhythm_window_timeout_after_800ms():
@@ -153,7 +85,7 @@ def test_rhythm_window_timeout_after_800ms():
         detector.feed()
         
         mock_time.return_value = 0.16
-        detector.on_silence()
+
         
         mock_time.return_value = 0.85
         event = detector.check_window_timeout()
@@ -171,7 +103,7 @@ def test_no_timeout_within_window():
         detector.feed()
         
         mock_time.return_value = 0.16
-        detector.on_silence()
+
         
         mock_time.return_value = 0.5
         event = detector.check_window_timeout()
@@ -204,8 +136,7 @@ def test_reset_clears_state():
         detector.reset()
         
         assert detector._tap_count == 0
-        assert not detector._in_hold
-        assert detector._hold_spike_count == 0
+
 
 
 def test_four_tap_timing():
@@ -216,8 +147,32 @@ def test_four_tap_timing():
             clock.return_value = at
             detector.feed()
             clock.return_value = at + 0.17
-            detector.on_silence()
+
         clock.return_value = 0.9
         detected = detector.check_window_timeout()
     assert detected is not None
     assert detected.pattern == TapPattern.QUADRUPLE
+
+
+def test_three_close_impacts_are_triple_not_hold():
+    detector = PatternDetector(min_gap_ms=100)
+    with patch("time.monotonic") as clock:
+        for at in (0.0, 0.12, 0.24):
+            clock.return_value = at
+            detector.feed()
+        clock.return_value = 0.9
+        assert detector.check_window_timeout().pattern == TapPattern.TRIPLE
+        assert detector.check_window_timeout() is None
+
+
+def test_wait_for_quiet_after_last_tap():
+    detector = PatternDetector()
+    with patch("time.monotonic") as clock:
+        clock.return_value = 0.0
+        detector.feed()
+        clock.return_value = 0.79
+        detector.feed()
+        clock.return_value = 0.85
+        assert detector.check_window_timeout() is None
+        clock.return_value = 0.95
+        assert detector.check_window_timeout().pattern == TapPattern.DOUBLE

@@ -47,14 +47,14 @@ def test_impact_detector_rejects_slow_onset():
 
 
 def test_more_than_four_typing_hits_never_saturate_to_quadruple():
-    gate = PatternDetector(min_gap_ms=100, rhythm_window_ms=800, enable_hold=False)
+    gate = PatternDetector(min_gap_ms=100, rhythm_window_ms=800)
     gate._last_tap_time = -1.0
     with patch("time.monotonic") as clock:
         for at in (0.1, 0.27, 0.44, 0.61, 0.78, 0.95, 1.12):
             clock.return_value = at
             gate.feed()
             clock.return_value = at + 0.16
-            gate.on_silence()
+
         clock.return_value = 2.0
         assert gate.check_window_timeout() is None
         assert gate._overflow is False
@@ -62,7 +62,7 @@ def test_more_than_four_typing_hits_never_saturate_to_quadruple():
         clock.return_value = 2.4
         gate.feed()
         clock.return_value = 2.58
-        gate.on_silence()
+
         clock.return_value = 3.3
         event = gate.check_window_timeout()
         assert event is not None

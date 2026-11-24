@@ -104,11 +104,6 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     pattern = PatternDetector(
         min_gap_ms=detection.get("min_gap_ms", 150),
         rhythm_window_ms=detection.get("rhythm_window_ms", 800),
-        long_press_ms=detection.get("long_press_ms", 500),
-        medium_hold_ms=detection.get("medium_hold_ms", 2000),
-        long_hold_ms=detection.get("long_hold_ms", 4000),
-        hold_repeat_ms=detection.get("hold_repeat_ms", 500),
-        enable_hold=detection.get("enable_hold_gestures", False),
     )
     impact = ImpactDetector(
         min_gap_ms=detection.get("min_gap_ms", 150),
@@ -197,9 +192,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 if confirmed:
                     if dry_run and impact.confirmed_peak is not None:
                         report("impact_sample", db=round(impact.confirmed_peak, 1), accepted=True)
-                    handle(pattern.feed())
-                if not spike:
-                    handle(pattern.on_silence())
+                    pattern.feed()
                 if impact.rejected_reason and impact.rejected_reason != "echo / too close":
                     report("rejected", reason=impact.rejected_reason,
                          db=round(db, 1), threshold_db=round(limit, 1))
