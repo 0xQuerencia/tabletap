@@ -98,9 +98,7 @@ Review every command in your config and do not map destructive commands
 or sensitive actions to accidental gestures. There is no tap-based
 authentication.
 
-Hold gestures are experimental and disabled by default because
-sustained physical pressure cannot be inferred reliably from a
-microphone. Single/double/triple-tap rhythms are the default interaction; four-tap
+Single/double/triple-tap rhythms are the default interaction; four-tap
 execution is disabled unless you explicitly opt in.
 
 ## 5. Troubleshooting

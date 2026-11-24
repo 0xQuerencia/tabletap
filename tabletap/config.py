@@ -56,9 +56,6 @@ def validate_config(cfg: dict) -> list[str]:
         if rhythm_window < 200 or rhythm_window > 3000:
             warnings.append(f"rhythm_window_ms {rhythm_window} outside typical range 200-3000")
         
-        long_press = cfg["detection"].get("long_press_ms", 500)
-        if long_press < 100 or long_press > 5000:
-            warnings.append(f"long_press_ms {long_press} outside typical range 100-5000")
     
     return warnings
 

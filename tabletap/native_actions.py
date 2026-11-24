@@ -1,12 +1,8 @@
-import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
-
-from .integrations import obs_request, home_request
 
 CATALOG = {
     item["id"]: item
@@ -25,10 +21,6 @@ def validate_builtin(value: str):
     if param:
         if not sep or not arg.strip() or len(arg) > 100 or any(not c.isprintable() for c in arg):
             raise ValueError(f"{item['label']} requires a {param} parameter")
-        if param == "shortcut" and not re.fullmatch(r"[A-Za-z0-9_]+(?:\+[A-Za-z0-9_]+)*", arg):
-            raise ValueError("Invalid configured shortcut")
-        if param in ("light", "switch", "scene") and not re.fullmatch(param + r"\.[a-z0-9_]+", arg):
-            raise ValueError(f"Expected a {param} entity ID")
     elif sep:
         raise ValueError(f"{item['label']} does not accept a parameter")
     return item, arg
@@ -42,10 +34,6 @@ def unavailable(item: dict) -> str | None:
     if item["id"].startswith("hyprland.") and not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         return "Requires a running Hyprland session"
     adapter = item.get("adapter")
-    if adapter == "obs" and importlib.util.find_spec("websocket") is None:
-        return "Install optional OBS support: pip install 'tabletap[obs]'"
-    if adapter == "home" and not (os.environ.get("TABLETAP_HA_URL") and os.environ.get("TABLETAP_HA_TOKEN")):
-        return "Set TABLETAP_HA_URL and TABLETAP_HA_TOKEN"
     if adapter == "key":
         choices = ("wtype", "ydotool") if os.environ.get("WAYLAND_DISPLAY") else ("xdotool",)
         if not any(shutil.which(tool) for tool in choices):
@@ -66,10 +54,6 @@ def execute_native(value: str, press_key=None):
     if reason:
         raise RuntimeError(f"{item['label']}: {reason}")
     adapter = item.get("adapter")
-    if adapter == "obs":
-        return obs_request(item["id"], arg)
-    if adapter == "home":
-        return home_request(item["id"], arg)
     if adapter == "key":
         if press_key is None:
             raise RuntimeError("Keyboard backend unavailable")

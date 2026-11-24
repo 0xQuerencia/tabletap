@@ -19,15 +19,10 @@ filter:
 detection:
   min_gap_ms: 150         # minimum time between taps
   rhythm_window_ms: 800   # window for detecting multi-tap patterns
-  long_press_ms: 500      # short hold (backward compat) - 500ms-2s
-  medium_hold_ms: 2000    # medium hold - 2s-4s
-  long_hold_ms: 4000      # long hold - 4s+
   enable_four_taps: false # explicitly opt in: 4-tap misreads can interrupt work
   broadband_guard: true   # ignore speech-like, high-frequency-rich sounds
   max_impact_ms: 220      # reject sustained sound instead of classifying it as a tap
   min_attack_db: 7.0      # require sharp onset
-  enable_hold_gestures: false  # sustained pressure cannot be reliably inferred from microphone audio
-  hold_repeat_ms: 500     # repeat interval during sustained hold
 
 # Auto-calibration settings
 calibration:
@@ -49,19 +44,6 @@ actions:
   quadruple:
     type: key
     value: alt+tab
-  long:          # 500ms-2s
-    type: key
-    value: alt+tab
-  medium:        # 2s-4s
-    type: exec
-    value: "pactl set-sink-volume @DEFAULT_SINK@ +5%"
-  extended:      # 4s+
-    type: exec
-    value: "loginctl lock-session"
-  repeat:        # Every 500ms during hold
-    type: exec
-    value: "pactl set-sink-volume @DEFAULT_SINK@ +2%"
-  
   # Category-based actions (numbered 1-N)
   # Use with: tabletap start --category <name>
   productivity:
@@ -99,20 +81,6 @@ actions:
       name: "Full Screen"
       type: key
       value: "f11"
-  
-  smart_home:
-    1:
-      name: "Lights Toggle"
-      type: script
-      value: "~/.local/bin/tabletap-lights toggle"
-    2:
-      name: "Lights Dim"
-      type: script
-      value: "~/.local/bin/tabletap-lights dim"
-    3:
-      name: "All Off"
-      type: script
-      value: "~/.local/bin/tabletap-lights off"
   
   media:
     1:

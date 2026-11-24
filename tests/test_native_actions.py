@@ -27,3 +27,11 @@ def test_missing_dependency():
         with pytest.raises(RuntimeError, match="playerctl"):
             execute_native("media.play_pause")
         run.assert_not_called()
+
+
+@pytest.mark.parametrize("value", ["obs.record_toggle", "home.light_toggle:light.desk", "discord.mute:ctrl+m", "vscode.build", "x.stop"])
+def test_removed_integration_ids_fail_closed(value):
+    with patch("tabletap.native_actions.subprocess.run") as run:
+        with pytest.raises(ValueError, match="Unknown built-in"):
+            execute_native(value)
+        run.assert_not_called()

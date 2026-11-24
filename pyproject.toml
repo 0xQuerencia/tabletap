@@ -20,7 +20,6 @@ tabletap = "tabletap.__main__:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.0"]
-obs = ["websocket-client>=1.8,<2"]
 
 [tool.setuptools.package-data]
 tabletap = ["default_config.yaml", "ui/*.tsx", "ui/*.ts", "ui/*.json", "ui/*.toml"]

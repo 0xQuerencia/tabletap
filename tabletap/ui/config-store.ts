@@ -18,7 +18,7 @@ export type TableConfig = {
 }
 
 export const FOUR_GESTURES = ["single", "double", "triple", "quadruple"] as const
-export const HOLD_GESTURES = ["long", "medium", "extended", "repeat"] as const
+
 
 export function readTableConfig(path: string): TableConfig {
   const content = readFileSync(path, "utf8")
@@ -46,10 +46,7 @@ export function getProfiles(config: TableConfig): string[] {
 
 export function getActionRows(config: TableConfig, profile: string): [string, Action][] {
   if (profile === "default") {
-    const order = [
-      ...FOUR_GESTURES,
-      ...(config.detection?.enable_hold_gestures ? HOLD_GESTURES : []),
-    ]
+    const order = FOUR_GESTURES
     return order.reduce<[string, Action][]>((rows, gesture) => {
       const action = config.actions[gesture]
       rows.push([gesture, action && typeof action === "object" && "value" in action ? action as Action : {}])
@@ -65,7 +62,7 @@ export function getActionRows(config: TableConfig, profile: string): [string, Ac
 
 export function actionFieldPath(profile: string, key: string, field: string): ConfigField[] {
   if (profile === "default") {
-    if (![...FOUR_GESTURES,...HOLD_GESTURES].includes(key as never)) throw new Error("Invalid gesture")
+    if (!FOUR_GESTURES.includes(key as never)) throw new Error("Invalid gesture")
     return ["actions", key, field]
   }
   if (!validProfileName(profile) || !/^[1-9]\d*$/.test(key) || Number(key) > 20) throw new Error("Invalid numbered profile action (1–20)")
@@ -137,7 +134,7 @@ export function updateConfigAction(
 
 export function validProfileName(name: string): boolean {
   return /^[A-Za-z0-9_-]{1,40}$/.test(name) &&
-    !["default", "__proto__", "prototype", "constructor", ...FOUR_GESTURES, ...HOLD_GESTURES].includes(name)
+    !["default", "__proto__", "prototype", "constructor", ...FOUR_GESTURES, "long", "medium", "extended", "repeat"].includes(name)
 }
 
 export function createActionProfile(path: string, name: string, source?: string, demo = false): TableConfig {

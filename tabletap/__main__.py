@@ -54,7 +54,7 @@ def main():
 
     start_p = sub.add_parser("start", help="Start the tabletap daemon")
     start_p.add_argument("-c", "--config", help="Path to config.yaml")
-    start_p.add_argument("--category", help="Action category to use (productivity, multitasking, smart_home, media)")
+    start_p.add_argument("--category", help="Action category to use (productivity, multitasking, media)")
     start_p.add_argument("--preview", action="store_true", help="Start the background service with actions disabled")
     control_p = sub.add_parser("control", help="Control or watch the running background listener")
     control_p.add_argument("operation", choices=("status","watch","safe","stop","reload","arm"))
@@ -103,12 +103,6 @@ def main():
     acoustic_p.add_argument("--label", choices=("tap", "noise"))
     acoustic_p.add_argument("--db", type=float)
     acoustic_p.add_argument("--accepted", action="store_true")
-    packs_p = sub.add_parser("profiles", help="Export, inspect and import portable action profiles")
-    packs_p.add_argument("operation", choices=("export","inspect","import"))
-    packs_p.add_argument("file")
-    packs_p.add_argument("--name")
-    packs_p.add_argument("--trust", action="store_true", help="Explicitly trust reviewed executable mappings")
-    packs_p.add_argument("-c", "--config")
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
@@ -142,14 +136,6 @@ def main():
             sys.exit(1)
         except KeyboardInterrupt:
             pass
-        return
-
-    if args.command == "profiles":
-        from .profile_packs import pack_command
-        try:
-            print(pack_command(args))
-        except (OSError, ValueError, RuntimeError) as exc:
-            parser.error(str(exc))
         return
 
     if args.command == "actions":
