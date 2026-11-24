@@ -27,7 +27,7 @@ button:focus-visible, entry:focus-visible { outline: 2px solid #e6a15d; }
 button:disabled { opacity: .5; }
 button.accent { background: #e6a15d; color: #21170f; border-color: #e6a15d; font-weight: 700; }
 button.accent:hover { background: #f0b77e; }
-button.nav { background: transparent; border-color: transparent; text-align: left; }
+button.nav { background: transparent; border-color: transparent; }
 button.selected { background: #3a3025; color: #f4b979; border-color: #51402d; }
 button.danger { color: #e79a83; }
 entry, dropdown { background: #1b1917; color: #f0ede7; border: 1px solid #403b35; border-radius: 8px; padding: 6px; }
@@ -50,7 +50,7 @@ window.light .success { color: #346d42; }
 """
 
 
-def run_desktop(demo=False):
+def run_desktop(demo=False, smoke=False):
     import gi
     gi.require_version("Gtk", "4.0")
     from gi.repository import Gtk, Gdk, GLib, Gio
@@ -120,6 +120,8 @@ def run_desktop(demo=False):
             self.choice = {"name": "Play / pause", "type": "builtin", "value": "media.play_pause"}
             self.catalog = []
             self.light = False
+            self.tray = None
+            self.exit_error = None
 
         def do_activate(self):
             if getattr(self, "win", None):
@@ -142,17 +144,60 @@ def run_desktop(demo=False):
             self.onboarding = not self.cfg.get("desktop", {}).get("onboarded", False)
             self.render()
             self.win.present()
+            if smoke:
+                GLib.idle_add(self.smoke)
             if not demo:
+                try:
+                    from .desktop_tray import Tray
+                    self.tray = Tray(self.win.present, lambda: self.async_job(self.session.pause),
+                                     lambda: self.async_job(self.session.stop), self.quit_desktop)
+                except GLib.Error:
+                    pass
                 GLib.timeout_add(400, self.poll)
                 self.poll()
+
+        def smoke(self):
+            try:
+                from .desktop_tray import ITEM_XML, MENU_XML
+                Gio.DBusNodeInfo.new_for_xml(ITEM_XML)
+                Gio.DBusNodeInfo.new_for_xml(MENU_XML)
+                for page in ("General", "Gestures", "Calibration", "Profiles", "Activity", "Settings"):
+                    self.page = page
+                    self.render()
+                self.onboarding = True
+                for step in range(6):
+                    self.lesson = step
+                    self.render()
+                self.onboarding = False
+                self.quit()
+            except Exception as exc:
+                self.exit_error = exc
+                self.quit()
+            return False
+
+        def quit_desktop(self):
+            if self.busy:
+                self.win.present()
+                self.notice.set_text("Finish the current operation before quitting.")
+                return
+            self.async_job(self.session.stop, lambda _: self.shutdown_desktop())
+
+        def shutdown_desktop(self):
+            self.closed = True
+            if self.tray:
+                self.tray.close()
+            self.stop_watch()
+            self.worker.shutdown(wait=False, cancel_futures=True)
+            self.quit()
 
         def close(self, *_):
             if self.busy or self.calibration_running:
                 self.notice.set_text("Finish the current operation before closing.")
                 return True
-            self.closed = True
-            self.stop_watch()
-            self.worker.shutdown(wait=False, cancel_futures=True)
+            if self.tray and self.tray.registered:
+                self.win.hide()
+                return True
+            self.shutdown_desktop()
             return False
 
         def async_job(self, task, done=None):
@@ -162,6 +207,7 @@ def run_desktop(demo=False):
             if self.busy:
                 return
             self.busy = True
+            self.notice.remove_css_class("error")
             self.notice.set_text("Working…")
             future = self.worker.submit(task)
             def complete():
@@ -527,10 +573,23 @@ def run_desktop(demo=False):
             card.append(button("Choose microphone", self.choose_mic))
             four = Gtk.CheckButton(label="Enable four-tap gestures")
             four.set_active(self.cfg.get("detection", {}).get("enable_four_taps", False))
-            four.connect("toggled", lambda w: self.async_job(lambda: self.session.edit(lambda c: c.setdefault("detection", {}).update(enable_four_taps=w.get_active()))))
+            def four_changed(widget):
+                enabled = widget.get_active()
+                self.async_job(lambda: self.session.edit(lambda c: c.setdefault("detection", {}).update(enable_four_taps=enabled)))
+            four.connect("toggled", four_changed)
             card.append(four)
             self.content.append(card)
+            from .desktop_install import autostart_path, set_autostart
+            startup = Gtk.CheckButton(label="Start safe preview at login")
+            startup.set_active(autostart_path().exists())
+            def startup_changed(widget):
+                enabled = widget.get_active()
+                self.async_job(lambda: set_autostart(enabled))
+            startup.connect("toggled", startup_changed)
+            self.content.append(startup)
             self.content.append(button("Replay guided setup", self.replay))
+            if self.tray and self.tray.registered:
+                self.content.append(button("Quit TableTap", self.quit_desktop, "danger"))
             self.content.append(label("Configuration: " + str(self.session.path if self.session else "~/.config/tabletap/config.yaml"), "muted", True))
 
         def toggle_theme(self):
@@ -610,9 +669,15 @@ def run_desktop(demo=False):
             outer.append(self.notice)
             outer.append(self.lesson_next)
             if self.lesson == 0:
-                outer.append(button("Skip setup (configure manually)", self.skip))
+                outer.append(button("Skip setup (configure manually)", self.skip_setup))
             outer.append(self.status)
             self.update_status()
+
+        def skip_setup(self):
+            if demo:
+                self.skip()
+                return
+            self.async_job(lambda: self.session.edit(lambda c: c.setdefault("desktop", {}).update(onboarded=True)), lambda _: self.skip())
 
         def skip(self):
             if not self.busy:
@@ -628,4 +693,8 @@ def run_desktop(demo=False):
             self.lesson = max(0, min(5, self.lesson + direction))
             self.render()
 
-    return App().run([])
+    app = App()
+    status = app.run([])
+    if app.exit_error:
+        raise app.exit_error
+    return status

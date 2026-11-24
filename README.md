@@ -517,3 +517,21 @@ supported platform; desktop actions require their local tools.
 ### Upgrading older configurations
 
 Existing YAML is not rewritten automatically. Old hold mappings and hold settings are ignored; remap those actions to tap counts if needed. Removed application-specific built-in IDs and non-sequential workflow steps fail validation instead of executing; replace them with generic commands, shortcuts or scripts.
+
+## Graphical desktop app (preview)
+
+The optional GTK4 desktop application shares the same listener and configuration as the TUI. On Arch/CachyOS:
+
+```sh
+sudo pacman -S --needed gtk4 python-gobject portaudio base-devel
+python -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -e .
+.venv/bin/tabletap desktop --install-launcher
+.venv/bin/tabletap desktop
+```
+
+If your existing virtual environment cannot import `gi`, create a new environment with `--system-site-packages`. The application menu launcher points to that environment; keep it in place. On Ubuntu/Debian, install `python3-gi` and `gir1.2-gtk-4.0` using your package manager and use the system Python to create the environment.
+
+First-run setup measures quiet, work noise and deliberate taps, then requires a real double-tap in safe preview. Saving your first shortcut does not arm execution. Use General to explicitly enable shortcuts for ten minutes, or pause/stop at any time. Existing mappings are preserved except the double-tap you explicitly choose. Edits and calibration stop the listener; restart preview afterward.
+
+A compatible StatusNotifier tray host provides Open, Pause, Stop and Quit. Without a tray host, closing the window leaves the shared listener running; reopen TableTap from your launcher to control it. Start-at-login is optional and preview-only. `tabletap desktop --demo` does not access the microphone or execute mappings. `tabletap tui` remains supported.
