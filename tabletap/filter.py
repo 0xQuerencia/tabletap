@@ -115,6 +115,8 @@ class ImpactDetector:
         self.min_attack_db = float(min_attack_db)
         self._previous_db = None
         self._pending_since = None
+        self._pending_peak = None
+        self.confirmed_peak = None
         self._last_accepted_at = float("-inf")
         self._armed = True
         self.rejected_reason = None
@@ -126,6 +128,7 @@ class ImpactDetector:
              broadband: bool = False) -> bool:
         self.rejected_reason = None
         self.near_miss = None
+        self.confirmed_peak = None
         rise = 0.0 if self._previous_db is None else db - self._previous_db
         self._previous_db = db
         if broadband:
@@ -140,6 +143,7 @@ class ImpactDetector:
         active = db > threshold_db
         if self._pending_since is not None:
             if active:
+                self._pending_peak = max(self._pending_peak, db)
                 if now - self._pending_since > self.max_width:
                     self.rejected_reason = "sustained noise"
                     self._pending_since = None
@@ -154,6 +158,7 @@ class ImpactDetector:
                 self.rejected_reason = "echo / too close"
                 return False
             self._last_accepted_at = now
+            self.confirmed_peak = self._pending_peak
             return True
 
         if not active:
@@ -171,6 +176,7 @@ class ImpactDetector:
             self._armed = False
             if rise >= self.min_attack_db:
                 self._pending_since = now
+                self._pending_peak = db
             else:
                 self.rejected_reason = "slow onset"
         return False

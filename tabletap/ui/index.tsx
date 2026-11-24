@@ -33,6 +33,7 @@ type BridgeMessage =
   | { type: "stopped" }
   | { type: "rejected"; reason: string; db?: number; threshold_db?: number }
   | { type: "near_miss"; db: number; threshold_db: number; attack_db: number }
+  | { type: "impact_sample"; db: number; accepted: true }
   | { type: "live_expired"; message: string }
 
 const [activeTheme, setActiveTheme] = createSignal<PaletteName>("midnight")
@@ -108,6 +109,8 @@ function App() {
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
   const [events, setEvents] = createSignal<string[]>([])
   const [rejected, setRejected] = createSignal(0)
+  const [candidate, setCandidate] = createSignal<{db:number; accepted:boolean} | null>(null)
+  const [acousticBusy, setAcousticBusy] = createSignal(false)
   const [notice, setNotice] = createSignal(IS_DEMO ? "Demo mode: no commands execute" : "Press Space for safe preview · c to calibrate")
   const [selected, setSelected] = createSignal(0)
   const [editing, setEditing] = createSignal(false)
@@ -287,7 +290,10 @@ function App() {
       addLog("Python bridge expired live authorization; switching to preview")
       setNotice("LIVE ACTIONS EXPIRED · restarting safe preview")
       void startBridge(true)
+    } else if (m.type === "impact_sample") {
+      if (preview()) setCandidate({db:m.db, accepted:true})
     } else if (m.type === "near_miss") {
+      if (preview()) setCandidate({db:m.db, accepted:false})
       addLog(`Possible soft tap: ${m.db} dB (${m.threshold_db} dB threshold) · preview and recalibrate if intentional`)
     } else if (m.type === "rejected") {
       setRejected((v) => v + 1)
@@ -326,6 +332,8 @@ function App() {
   }
   async function startBridge(forceStop = false) {
     if (IS_DEMO || calibrating()) return
+    if (acousticBusy()) return
+    setCandidate(null)
     const ticket = ++listenerRequest
     await stopBridge(false, forceStop)
     if (ticket !== listenerRequest) return
@@ -555,6 +563,31 @@ function App() {
       // Doctor provides detailed errors. The dashboard stays usable.
     }
   }
+  async function acousticOperation(args: string[]) {
+    if (IS_DEMO || acousticBusy() || calibrating()) return
+    setAcousticBusy(true)
+    try {
+      disarm("Acoustic profile operation · live actions disabled", false)
+      await stopBridge()
+      const proc = Bun.spawn([PYTHON, "-m", "tabletap", "acoustic", ...args], {
+        stdout: "pipe", stderr: "ignore", stdin: "ignore",
+      })
+      const body = await new Response(proc.stdout).text()
+      await proc.exited
+      const result = JSON.parse(body)
+      setConfig(readConfig())
+      setCandidate(null)
+      setNotice(result.error || result.message || "Acoustic settings updated")
+      addLog(result.error || result.message || "Acoustic settings updated")
+    } catch (error) {
+      setNotice("Acoustic operation failed: " + String(error))
+    } finally { setAcousticBusy(false) }
+  }
+  function labelCandidate(label: "tap" | "noise") {
+    const sample = candidate()
+    if (!sample || !preview()) { setNotice("Listen in safe preview and label the most recent impact"); return }
+    void acousticOperation(["feedback", "--label", label, "--db", String(sample.db), ...(sample.accepted ? ["--accepted"] : [])])
+  }
   function cycleMicrophone() {
     const devices = micDevices()
     if (devices.length === 0) {
@@ -565,9 +598,7 @@ function App() {
     const current = config().audio?.device_index
     const choice = typeof current === "number" ? current : null
     const next = choices[(choices.indexOf(choice) + 1) % choices.length] ?? null
-    const name = next === null ? "system default" :
-      (devices.find((device) => device.index === next)?.name || "microphone " + next)
-    saveField(["audio", "device_index"], next, "microphone: " + name)
+    void acousticOperation(["device", next === null ? "default" : String(next)])
   }
   function toggleFourTaps() {
     const enable = config().detection?.enable_four_taps !== true
@@ -583,7 +614,7 @@ function App() {
       setNotice("Calibration requires a connected microphone; exit --demo")
       return
     }
-    if (calibrating()) return
+    if (calibrating() || acousticBusy()) return
     disarm("Calibration started · live actions disabled", false)
     await stopBridge()
     setCalibrating(true)
@@ -661,7 +692,7 @@ function App() {
     }
   }
   function runCommand(value: string) {
-    const [cmd, arg] = value.trim().replace(/^\//, "").split(/\s+/, 2)
+    const [cmd, arg, extra] = value.trim().replace(/^\//, "").split(/\s+/, 3)
     setCommandOpen(false)
     setCommandText("")
     if (cmd === "start") {
@@ -673,6 +704,11 @@ function App() {
       void stopBridge()
     }
     else if (cmd === "calibrate") void calibrate()
+    else if (cmd === "acoustic") {
+      if (arg === "use" && extra) void acousticOperation(["use", extra])
+      else if (arg && ["list","propose","apply","rollback"].includes(arg)) void acousticOperation([arg])
+      else setNotice("Try /acoustic use desk-name, list, propose, apply or rollback")
+    }
     else if (cmd === "preview" || cmd === "safe") {
       disarm("Safe preview enabled · commands disabled")
     }
@@ -848,6 +884,9 @@ function App() {
       if (key.name === "down" || key.name === "j") setSelected((v) => Math.min(rows().length - 1, v + 1))
       if (key.name === "return" || key.name === "enter" || key.name === "e" || key.name === "b") openBuilder()
       if (key.name === "t") changeActionType()
+    } else if (page() === 4) {
+      if (key.name === "t") labelCandidate("tap")
+      if (key.name === "n") labelCandidate("noise")
     } else if (page() === 3) {
       if (key.name === "+" || key.name === "=") adjustThreshold(2)
       if (key.name === "-") adjustThreshold(-2)
@@ -1067,6 +1106,8 @@ function App() {
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
             <text fg={theme.text}>Four taps      {config().detection?.enable_four_taps === true ? "ENABLED" : "DISABLED (safer)"} · press f to toggle</text>
             <text fg={theme.text}>Calibration    {config().calibration?.personalized ? "Personalized" : "Standard"} · g to switch, c to recalibrate</text>
+            <text fg={theme.text}>Desk profile   {config().calibration?.active_name || "default"}{config().calibration?.required ? " · calibration required" : ""}</text>
+            <text fg={theme.dim}>/acoustic use NAME · list · propose · apply · rollback</text>
             <text fg={theme.dim}>Rejected noise candidates: {rejected()} (this session)</text>
             <text fg={theme.dim}>Work-noise QA: stop listening, then run tabletap audit -d 60</text>
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>
@@ -1082,6 +1123,7 @@ function App() {
         <box flexGrow={1} paddingX={2} paddingTop={2} gap={1}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>ACTIVITY</text>
           <text fg={theme.dim}>Live gestures and bridge diagnostics; most recent first.</text>
+          <text fg={theme.accent}>{candidate() ? `Latest ${candidate()!.accepted ? "detected" : "possible missed"} impact: ${candidate()!.db} dB · T tap / N noise` : "Safe preview: T/N label latest impact · /acoustic propose"}</text>
           <scrollbox flexGrow={1} contentOptions={{ gap: 0 }}>
             <For each={events()}>{(entry) => <text fg={theme.text}>{entry}</text>}</For>
             <Show when={!events().length}><text fg={theme.dim}>Nothing recorded in this session.</text></Show>

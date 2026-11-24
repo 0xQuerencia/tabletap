@@ -14,7 +14,7 @@ export type TableConfig = {
   detection?: Record<string, number | boolean>
   filter?: Record<string, number | boolean>
   audio?: Record<string, unknown>
-  calibration?: { personalized?: boolean; duration_sec?: number }
+  calibration?: { personalized?: boolean; duration_sec?: number; active_name?: string; required?: boolean }
 }
 
 export const FOUR_GESTURES = ["single", "double", "triple", "quadruple"] as const

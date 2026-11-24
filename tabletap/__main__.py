@@ -193,6 +193,13 @@ def main():
     bridge_p.add_argument("--dry-run", action="store_true", help="Detect but do not execute")
     bridge_p.add_argument("--max-live-seconds", type=float, help=argparse.SUPPRESS)
     bridge_p.add_argument("--calibrate", action="store_true", help="Stream calibration progress")
+    acoustic_p = sub.add_parser("acoustic", help="Manage microphone/desk calibration and labeled feedback")
+    acoustic_p.add_argument("operation", choices=("list", "device", "use", "feedback", "propose", "apply", "rollback"))
+    acoustic_p.add_argument("value", nargs="?")
+    acoustic_p.add_argument("-c", "--config")
+    acoustic_p.add_argument("--label", choices=("tap", "noise"))
+    acoustic_p.add_argument("--db", type=float)
+    acoustic_p.add_argument("--accepted", action="store_true")
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
@@ -206,6 +213,16 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "acoustic":
+        import json
+        from .acoustic_cli import acoustic_command
+        try:
+            print(json.dumps(acoustic_command(args)))
+        except (ValueError, OSError, RuntimeError, TypeError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            sys.exit(1)
+        return
 
     if args.command == "audit":
         from .audit import observe_work, format_audit
@@ -386,7 +403,8 @@ def main():
         result = calibrate(cfg, duration_sec=args.duration if hasattr(args, "duration") else None)
         
         if not args.no_save:
-            config_path = save_calibration(cfg, result, args.config if hasattr(args, "config") else None)
+            from .acoustic_profiles import device_identity
+            config_path = save_calibration(cfg, result, args.config if hasattr(args, "config") else None, identity=device_identity(cfg))
             print(f"\n✓ Calibration saved to {config_path}")
             print(f"\nCalibration values:")
             print(f"  noise_floor_db: {result['noise_floor_db']}")

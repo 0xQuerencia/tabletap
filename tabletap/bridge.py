@@ -15,6 +15,7 @@ import time
 import yaml
 
 from .action import ActionRunner
+from .acoustic_profiles import verify_live, device_identity
 from .config import init_config, load_config
 from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
 from .lock import PIDLock
@@ -55,6 +56,12 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     if live_seconds is not None:
         if dry_run or not 0 < live_seconds <= 600:
             emit("error", message="A live authorization must be between 0 and 600 seconds, and cannot be used with --dry-run")
+            return 2
+    if not dry_run:
+        try:
+            verify_live(cfg)
+        except (OSError, ValueError, RuntimeError) as exc:
+            emit("error", message=str(exc))
             return 2
     audio = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
@@ -159,6 +166,8 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 # otherwise leaves the onset detector with stale energy.
                 confirmed = impact.feed(db, limit, now, broadband=broadband)
                 if confirmed:
+                    if dry_run and impact.confirmed_peak is not None:
+                        emit("impact_sample", db=round(impact.confirmed_peak, 1), accepted=True)
                     handle(pattern.feed())
                 if not spike:
                     handle(pattern.on_silence())
@@ -232,7 +241,7 @@ def run_calibration(config_path=None) -> int:
         # them on stderr so stdout remains a JSONL-only protocol for OpenTUI.
         with redirect_stdout(sys.stderr):
             result = calibrate(cfg, progress=progress)
-        save_calibration(cfg, result, config_path)
+        save_calibration(cfg, result, config_path, identity=device_identity(cfg))
         print(json.dumps({"type": "calibration_done", **result}),
               file=output, flush=True)
         return 0

@@ -500,3 +500,9 @@ Parallel blocks run 2–4 independent actions concurrently, then wait for dispat
 ```json
 [{"type":"if","value":{"condition":{"type":"microphone_muted"},"then":[{"type":"builtin","value":"audio.mic_toggle"}],"else":[]}},{"type":"parallel","value":[{"type":"exec","value":"xdg-open ."},{"type":"exec","value":"foot"}]}]
 ```
+
+### Desk profiles and feedback
+
+Use `/acoustic use desk-name` in the TUI (or `tabletap acoustic use desk-name` in a stopped session), then calibrate. Each named desk stores separate settings for each microphone identity and capture/filter configuration. Switching microphones in Settings loads the matching profile or requires new calibration before live actions. Unplugged/changed devices must be recalibrated; identical device names may not be distinguishable.
+
+In safe preview, open Activity and label the latest confirmed impact or possible missed tap with **T** (intentional tap) or **N** (noise). This saves only its level and label, stops listening, and does not change detection. Repeat to collect at least three missed taps or three false detections. Use `/acoustic propose` to inspect a bounded threshold adjustment and `/acoustic apply` to save it; the previous threshold is recoverable via `/acoustic rollback`. Test in preview and repeat the work-noise audit. Ambiguous labels are rejected rather than lowering the work-noise floor. No raw audio is saved. This is threshold feedback, not a source-separating speech model.

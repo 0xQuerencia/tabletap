@@ -82,7 +82,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     
     if not isinstance(cfg, dict):
         raise ValueError("Configuration YAML must contain a mapping, not a list or empty file")
-    for section in ("audio", "filter", "detection", "actions"):
+    for section in ("audio", "filter", "detection", "actions", "calibration"):
         if section in cfg and not isinstance(cfg[section], dict):
             raise ValueError(f"Configuration section {section!r} must be a mapping")
     warnings = validate_config(cfg)
@@ -104,54 +104,55 @@ def init_config(dest: str | Path | None = None) -> Path:
     return dest
 
 
-def save_calibration(cfg: dict, calibration: dict, path: Path | None = None) -> Path:
-    """Persist calibration without deleting action comments or risking a partial write.
-
-    The app's UI can edit the same YAML. Always reread the latest file instead
-    of dumping an old in-memory configuration over changes made by the user.
-    """
+def edit_config(path, mutate, fallback=None) -> Path:
     path = Path(path) if path is not None else DEFAULT_PATHS[0]
     path.parent.mkdir(parents=True, exist_ok=True)
-    yaml_editor = YAML()
-    yaml_editor.preserve_quotes = True
-    if path.exists():
+    editor = YAML()
+    editor.preserve_quotes = True
+    before = path.stat() if path.exists() else None
+    if before is not None:
         with path.open("r", encoding="utf-8") as source:
-            document = yaml_editor.load(source)
-        if not isinstance(document, dict):
-            raise ValueError("Cannot save calibration: config YAML must be a mapping")
+            document = editor.load(source)
     else:
-        document = dict(cfg)
-
-    detection = document.setdefault("detection", {})
-    if not isinstance(detection, dict):
-        raise ValueError("Cannot save calibration: detection must be a mapping")
-    for name in ("noise_floor_db", "slam_peak_db", "threshold_db", "work_peak_db"):
-        if name in calibration:
-            detection[name] = float(calibration[name])
-
+        document = dict(fallback or {})
+    if not isinstance(document, dict):
+        raise ValueError("Configuration YAML must contain a mapping")
+    mutate(document)
     temporary_path = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", dir=path.parent, prefix=".config-", suffix=".tmp",
-            encoding="utf-8", delete=False,
-        ) as output:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=".config-", suffix=".tmp",
+                                         encoding="utf-8", delete=False) as output:
             temporary_path = Path(output.name)
-            yaml_editor.dump(document, output)
+            editor.dump(document, output)
             output.flush()
             os.fsync(output.fileno())
         os.chmod(temporary_path, 0o600)
-        if path.exists():
+        if before is not None:
+            now = path.stat()
+            if (now.st_ino, now.st_mtime_ns, now.st_size) != (before.st_ino, before.st_mtime_ns, before.st_size):
+                raise ValueError("Configuration changed during edit; retry")
             shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+        elif path.exists():
+            raise ValueError("Configuration appeared during edit; retry")
         os.replace(temporary_path, path)
         temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+    return path
 
-    # Existing callers can continue using their in-memory calibrated values.
-    cfg.setdefault("detection", {}).update({
-        key: float(calibration[key])
-        for key in ("noise_floor_db", "slam_peak_db", "threshold_db", "work_peak_db")
-        if key in calibration
-    })
+
+def save_calibration(cfg: dict, calibration: dict, path: Path | None = None, identity=None) -> Path:
+    """Persist calibration without discarding other settings and comments."""
+    from .acoustic_profiles import FIELDS, remember, device_identity
+    values = {key: float(calibration[key]) for key in FIELDS if key in calibration}
+    def update(document):
+        if identity is not None and device_identity(document) != identity:
+            raise ValueError("Microphone/settings changed during calibration; retry")
+        document.setdefault("detection", {}).update(values)
+        if identity is not None:
+            document.setdefault("filter", {})["sensitivity_offset_db"] = 0
+            remember(document, identity)
+    path = edit_config(path, update, fallback=cfg)
+    cfg.setdefault("detection", {}).update(values)
     return path

@@ -7,6 +7,7 @@ export const COMMANDS = [
   { command: "activity", description: "Open recent activity", shortcut: "5" },
   { command: "theme", description: "Cycle theme (or /theme nord)", shortcut: "Shift+T" },
   { command: "profile", description: "Switch profile (or /profile media)", shortcut: "P" },
+  { command: "acoustic", description: "Desk profiles and acoustic feedback (use/list/propose/apply/rollback)", shortcut: "" },
   { command: "calibrate", description: "Start microphone calibration", shortcut: "C" },
   { command: "start", description: "Start safe preview listener", shortcut: "Space" },
   { command: "stop", description: "Stop microphone listener", shortcut: "Space" },
