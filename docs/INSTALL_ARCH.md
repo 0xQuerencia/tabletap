@@ -186,3 +186,7 @@ Already-launched external commands cannot be undone. Switching a profile,
 editing the YAML, calibrating, or stopping the listener also disarms.
 The optional headless systemd user service deliberately does **not** use
 the TUI arming UI; treat it as a separate, continuously executing mode.
+
+## Graphical interface
+
+Install GTK4 and the system Python bindings with `sudo pacman -S --needed gtk4 python-gobject`. Create a virtual environment with `python -m venv --system-site-packages .venv`, then install TableTap into it. Run `.venv/bin/tabletap desktop --install-launcher` to add the application-menu entry. Start `.venv/bin/tabletap desktop` or use the launcher. This is separate from the optional Bun-based TUI.

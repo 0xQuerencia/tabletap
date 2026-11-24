@@ -1,6 +1,5 @@
 """Desktop controls for the existing config and background listener."""
 import json
-import os
 import re
 import subprocess
 import sys

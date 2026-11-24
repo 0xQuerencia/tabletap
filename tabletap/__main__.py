@@ -105,6 +105,8 @@ def main():
     acoustic_p.add_argument("--accepted", action="store_true")
     desktop_p = sub.add_parser("desktop", help="Launch native graphical TableTap")
     desktop_p.add_argument("--demo", action="store_true", help="Preview the desktop without microphone access")
+    desktop_p.add_argument("--install-launcher", action="store_true", help="Install an application-menu launcher")
+    desktop_p.add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
@@ -278,9 +280,15 @@ def main():
         return
 
     if args.command == "desktop":
+        if args.install_launcher:
+            from .desktop_install import install_launcher
+            print(install_launcher())
+            return
+        if args.smoke and not args.demo:
+            parser.error("--smoke requires --demo")
         try:
             from .desktop import run_desktop
-            sys.exit(run_desktop(args.demo))
+            sys.exit(run_desktop(args.demo, args.smoke))
         except (ImportError, ValueError) as exc:
             print("[tabletap] Desktop needs GTK4 and PyGObject. On Arch: sudo pacman -S gtk4 python-gobject", file=sys.stderr)
             print("Use a virtual environment with --system-site-packages. " + str(exc), file=sys.stderr)
