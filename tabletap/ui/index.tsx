@@ -573,7 +573,7 @@ function App() {
               if (typeof data.db === "number") setLevel(data.db)
               setNotice(phase === "noise" ? "Stay quiet while measuring room noise…" :
                 phase === "work" ? "TYPE, SPEAK AND CLICK NORMALLY NOW." :
-                phase === "tap" ? "TAP YOUR DESK 5–10 TIMES NOW." :
+                phase === "tap" ? (config().calibration?.personalized ? "MAKE AT LEAST 6 SEPARATE SOFT AND NORMAL TAPS." : "TAP YOUR DESK 5–10 TIMES NOW.") :
                 "Get ready to tap your desk…")
             } else if (data.type === "calibration_done") {
               setConfig(readConfig())
@@ -757,6 +757,7 @@ function App() {
       if (key.name === "-") adjustThreshold(-2)
       if (key.name === "m") cycleMicrophone()
       if (key.name === "f") toggleFourTaps()
+      if (key.name === "g") saveField(["calibration", "personalized"], config().calibration?.personalized !== true, "calibration mode (press c to recalibrate)")
     }
   })
 
@@ -920,11 +921,11 @@ function App() {
           <box width={Math.max(22, Math.min(70, dimensions().width - 8))} padding={2} backgroundColor={theme.pane} border borderColor={theme.border} gap={1}>
             <text fg={theme.text}>01  Quiet room      ·  measure ambient noise</text>
             <text fg={theme.text}>02  Work normally   ·  type, speak and click (negative examples)</text>
-            <text fg={theme.text}>03  Tap surface     ·  learn deliberate desk knocks</text>
+            <text fg={theme.text}>03  Tap surface     ·  {config().calibration?.personalized ? "6+ separate soft and normal taps" : "learn deliberate desk knocks"}</text>
             <text fg={theme.text}>04  Save threshold  ·  require knocks louder than typing</text>
             <text fg={theme.dim}>Saved noise floor: {config().detection?.noise_floor_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Saved work peak:   {config().detection?.work_peak_db ?? "not calibrated"} dB</text>
-            <text fg={theme.dim}>Saved tap peak:    {config().detection?.slam_peak_db ?? "not calibrated"} dB</text>
+            <text fg={theme.dim}>Saved tap reference: {config().detection?.slam_peak_db ?? "not calibrated"} dB</text>
             <text fg={theme.dim}>Current threshold: {threshold()} dB</text>
             <text fg={theme.accent}>Phase: {calPhase().toUpperCase()}  {calProgress()}%</text>
             <text fg={theme.good}>{"━".repeat(Math.round(calProgress() / 5))}<span style={{ fg: theme.border }}>{"┄".repeat(20 - Math.round(calProgress() / 5))}</span></text>
@@ -950,6 +951,7 @@ function App() {
             <text fg={theme.text}>Bandpass       {String(config().filter?.low ?? 50)} – {String(config().filter?.high ?? 800)} Hz</text>
             <text fg={theme.text}>Rhythm window  {config().detection?.rhythm_window_ms ?? 800} ms</text>
             <text fg={theme.text}>Four taps      {config().detection?.enable_four_taps === true ? "ENABLED" : "DISABLED (safer)"} · press f to toggle</text>
+            <text fg={theme.text}>Calibration    {config().calibration?.personalized ? "Personalized" : "Standard"} · g to switch, c to recalibrate</text>
             <text fg={theme.dim}>Rejected noise candidates: {rejected()} (this session)</text>
             <text fg={theme.dim}>Work-noise QA: stop listening, then run tabletap audit -d 60</text>
             <text fg={theme.text}>Tap gap        {config().detection?.min_gap_ms ?? 150} ms</text>

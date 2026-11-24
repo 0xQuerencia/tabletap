@@ -31,6 +31,7 @@ detection:
 
 # Auto-calibration settings
 calibration:
+  personalized: false # opt in to weak-tap training with strict work-noise floor
   duration_sec: 5  # seconds to sample for auto-calibration
 
 # Actions mapped to tap patterns

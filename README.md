@@ -460,3 +460,7 @@ The default three-tap map and hardware detection remain unchanged.
 ### Missed-tap diagnostics
 
 In safe preview, watch Activity for **Possible soft tap** events: a sharp onset within 6 dB below the current threshold. These are candidates, not confirmed taps, and never execute actions. Rejected-noise entries also show the measured level and threshold. If deliberate taps repeatedly appear here, recalibrate and include your normal softer taps; run the work-noise audit before arming. No raw audio is stored and the detection decisions are unchanged.
+
+### Personalized soft-tap calibration (opt-in)
+
+In Settings press **g** to select Personalized, then **c** to calibrate again. During the work phase type, speak and click as you normally do; during the tap phase make at least six separated soft and normal desk knocks. This mode fits a weak-tap reference from distinct sharp, short impacts and uses the maximum observed work-noise level plus a 4 dB margin as a hard floor. It refuses to save if fewer than six clean impacts are recognized or their energy overlaps work noise. Switching the setting alone does not alter saved thresholds until you recalibrate. Use safe preview and a new work-noise audit before arming. No raw audio is retained, and synthetic tests are not a hardware accuracy guarantee.
