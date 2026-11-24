@@ -4,12 +4,48 @@ import sys
 import numpy as np
 
 from .mic import MicCapture, rms_db
+from .filter import ImpactDetector, is_broadband_noise
+
+
+def fit_personalized_threshold(noise_floor: float, work_peak: float, samples: list,
+                               detection: dict) -> tuple[float, float, int]:
+    """Fit from individual confirmed impacts, not the loudest audio chunks."""
+    floor = max(noise_floor + 6.0, work_peak + 4.0)
+    detector = ImpactDetector(
+        min_gap_ms=detection.get("min_gap_ms", 150),
+        max_width_ms=detection.get("max_impact_ms", 220),
+        min_attack_db=detection.get("min_attack_db", 7.0),
+    )
+    peaks = []
+    peak = None
+    for now, db, broadband in samples:
+        if broadband:
+            peak = None
+        elif db > floor:
+            peak = db if peak is None else max(peak, db)
+        if detector.feed(db, floor, now, broadband=broadband) and peak is not None:
+            peaks.append(peak)
+        if db <= floor:
+            peak = None
+    if len(peaks) < 6:
+        raise ValueError(
+            f"Only {len(peaks)} of at least 6 clean taps recognized during training. "
+            "Use a harder surface or different microphone and retry; previous calibration preserved."
+        )
+    weak = float(np.percentile(peaks, 20))
+    # Never go below the measured worst-case work-noise level plus margin.
+    threshold = max(floor, noise_floor + (weak - noise_floor) * 0.35)
+    if weak - threshold < 2.0:
+        raise ValueError("Soft taps overlap normal work noise; previous calibration preserved.")
+    return weak, threshold, len(peaks)
 
 
 def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, progress=None) -> dict:
     audio_cfg = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     cal_cfg = cfg.get("calibration", {})
+    personalized = cal_cfg.get("personalized", False) is True
+    detection = cfg.get("detection", {})
     duration = duration_sec if duration_sec is not None else cal_cfg.get("duration_sec", 5)
     if not isinstance(duration, (int, float)) or duration <= 0:
         raise ValueError("Calibration duration must be greater than zero seconds")
@@ -56,10 +92,10 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
                 progress("work", time.monotonic() - start, duration, db)
     if not work_samples:
         raise ValueError("No audio samples received during normal-working calibration")
-    work_peak = float(np.percentile(work_samples, 99.5))
+    work_peak = float(max(work_samples) if personalized else np.percentile(work_samples, 99.5))
 
     print(f"\n[tabletap] Phase 3: Deliberately tap the desk for {duration} seconds!")
-    print("[tabletap] Hit it like you would during normal use.")
+    print("[tabletap] Make at least 6 separated soft and normal taps." if personalized else "[tabletap] Hit it like you would during normal use.")
     sys.stdout.flush()
 
     if progress is not None:
@@ -69,14 +105,25 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
         progress("tap", 0, duration, None)
 
     slam_samples = []
+    impact_samples = []
     start = time.monotonic()
 
     with MicCapture(audio_cfg, filter_cfg) as mic:
         while time.monotonic() - start < duration:
-            _, filtered = mic.read_filtered()
+            raw, filtered = mic.read_filtered()
             db = rms_db(filtered)
             slam_samples.append(db)
-            elapsed = time.monotonic() - start
+            now = time.monotonic()
+            elapsed = now - start
+            if personalized:
+                floor = max(noise_floor + 6.0, work_peak + 4.0)
+                broadband = bool(
+                    detection.get("broadband_guard", True)
+                    and db > floor - 12.0
+                    and rms_db(raw) > noise_floor + 14.0
+                    and is_broadband_noise(raw, audio_cfg.get("sample_rate", 44100))
+                )
+                impact_samples.append((now, float(db), broadband))
             if progress is not None:
                 progress("tap", elapsed, duration, db)
             bar_len = int((elapsed / duration) * 30)
@@ -104,7 +151,15 @@ def calibrate(cfg: dict, duration_sec: int = None, margin_db: float = None, prog
             "Try a different microphone or tap surface, then recalibrate; "
             "your previous configuration was preserved."
         )
-    if margin_db is not None:
+    if personalized:
+        slam_peak, threshold, count = fit_personalized_threshold(noise_floor, work_peak, impact_samples, detection)
+        gap = slam_peak - noise_floor
+        print(f"[tabletap] Learned {count} distinct tap examples (weak-tap reference: {slam_peak:.1f} dB)")
+        if margin_db is not None:
+            threshold = max(work_peak + 4.0, noise_floor + 6.0, threshold + margin_db)
+            if threshold >= slam_peak - 2.0:
+                raise ValueError("Requested margin would reject soft taps; previous calibration preserved.")
+    elif margin_db is not None:
         threshold = max(noise_floor, min(threshold + margin_db, slam_peak + margin_db - 0.5))
 
     print(f"[tabletap] Noise floor:  {noise_floor:.1f} dB")

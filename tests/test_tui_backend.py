@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from tabletap.action import ActionRunner
 from tabletap.bridge import emit, run_bridge
-from tabletap.daemon import Daemon
+from tabletap.daemon import run_service
 
 
 def test_bridge_emits_machine_readable_json(capsys):
@@ -59,11 +59,17 @@ def test_scripts_split_path_and_arguments_without_shell():
     runner.shutdown()
 
 
-def test_daemon_accepts_selected_category():
-    with patch("tabletap.daemon.PIDLock"):
-        daemon = Daemon({"actions": {"media": {1: {"type": "exec", "value": "true"}}}}, category="media")
-    assert daemon.action_runner.category == "media"
-    daemon.action_runner.shutdown()
+def test_daemon_delegates_to_shared_bridge():
+    from unittest.mock import MagicMock
+    hub = MagicMock()
+    hub.take_request.return_value = {"command":"stop"}
+    factory = MagicMock()
+    factory.return_value.__enter__.return_value = hub
+    with patch("tabletap.daemon.PIDLock") as lock, patch("tabletap.daemon.run_bridge", return_value=0) as bridge:
+        lock.return_value.acquire.return_value = True
+        assert run_service("/config", category="media", preview=True, hub_factory=factory) == 0
+    assert bridge.call_args.args == ("/config", "media", True, None)
+    lock.return_value.release.assert_called_once()
 
 
 def test_category_four_taps_routes_fourth_action():

@@ -14,7 +14,7 @@ def user_service_path() -> Path:
     return root / "systemd" / "user" / "tabletap.service"
 
 
-def render_user_service(python_executable: str) -> str:
+def render_user_service(python_executable: str, live=False) -> str:
     executable = Path(python_executable)
     if not executable.is_absolute():
         raise ValueError("The service needs an absolute Python executable path")
@@ -27,7 +27,7 @@ def render_user_service(python_executable: str) -> str:
         "After=graphical-session.target\n\n"
         "[Service]\n"
         "Type=simple\n"
-        f"ExecStart={quoted} -m tabletap start\n"
+        f"ExecStart={quoted} -m tabletap start{'' if live else ' --preview'}\n"
         "Restart=on-failure\n"
         "RestartSec=5\n"
         "Environment=PYTHONUNBUFFERED=1\n\n"
@@ -36,12 +36,12 @@ def render_user_service(python_executable: str) -> str:
     )
 
 
-def install_user_service(python_executable: str) -> Path:
+def install_user_service(python_executable: str, live=False) -> Path:
     target = user_service_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(".tabletap.service.tmp-" + str(os.getpid()))
     try:
-        temporary.write_text(render_user_service(python_executable), encoding="utf-8")
+        temporary.write_text(render_user_service(python_executable, live=live), encoding="utf-8")
         temporary.chmod(0o600)
         os.replace(temporary, target)
     finally:

@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}1. Testing Backward Compatibility${NC}"
 echo "   Running with default flat rhythm actions..."
 echo ""
-python test_categories.py | head -n 10
+python -m pytest tests/test_tui_backend.py -q
 echo ""
 
 echo -e "${BLUE}2. Available Categories${NC}"
@@ -26,7 +26,7 @@ import yaml
 with open('config.yaml') as f:
     cfg = yaml.safe_load(f)
     actions = cfg['actions']
-    for cat in ['productivity', 'multitasking', 'smart_home', 'media']:
+    for cat in ['productivity', 'multitasking', 'media']:
         if cat in actions:
             print(f'   • {cat}:')
             for num, action in actions[cat].items():
@@ -40,7 +40,7 @@ echo -e "${BLUE}3. Usage Examples${NC}"
 echo ""
 echo -e "${GREEN}# Default mode (backward compatible):${NC}"
 echo "   tabletap start"
-echo "   → Uses flat rhythm actions: single, double, triple, long"
+echo "   → Uses flat rhythm actions: single, double, triple, quadruple (opt in)"
 echo ""
 
 echo -e "${GREEN}# Productivity mode:${NC}"
@@ -57,13 +57,6 @@ echo "   → 1 tap = Mission Control"
 echo "   → 2 taps = Split Left"
 echo "   → 3 taps = Split Right"
 echo "   → 4 taps = Full Screen"
-echo ""
-
-echo -e "${GREEN}# Smart Home mode:${NC}"
-echo "   tabletap start --category smart_home"
-echo "   → 1 tap = Lights Toggle"
-echo "   → 2 taps = Lights Dim"
-echo "   → 3 taps = All Off"
 echo ""
 
 echo -e "${GREEN}# Media Control mode:${NC}"
@@ -100,6 +93,6 @@ print('   ✓ Category mode working correctly!')
 echo ""
 
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║  Implementation Complete! All tests passing.                   ║${NC}"
-echo -e "${GREEN}║  See CATEGORIES.md for full documentation.                     ║${NC}"
+echo -e "${GREEN}║  Demo finished. Review command output above.                   ║${NC}"
+echo -e "${GREEN}║  See README.md for full documentation.                        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"

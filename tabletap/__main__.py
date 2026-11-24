@@ -8,9 +8,8 @@ from pathlib import Path
 
 from . import __version__
 from .config import load_config, init_config, save_calibration
-from .daemon import Daemon
+from .daemon import run_service
 from .calibrate import calibrate
-from .filter import AdaptiveThreshold
 
 
 def _prepare_ui():
@@ -22,130 +21,27 @@ def _prepare_ui():
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     ui = base / "tabletap" / ("ui-v" + __version__)
     ui.mkdir(parents=True, exist_ok=True)
-    for name in ("index.tsx", "config-store.ts", "safety.ts", "themes.ts", "commands.ts", "action-builder.ts", "package.json", "tsconfig.json", "bunfig.toml"):
+    for name in ("index.tsx", "config-store.ts", "safety.ts", "themes.ts", "commands.ts", "action-builder.ts", "native-actions.json", "package.json", "tsconfig.json", "bunfig.toml"):
         shutil.copy2(bundled / name, ui / name)
     return ui
 
 
-def monitor_cmd(cfg: dict):
-    import time
-    from .mic import MicCapture, rms_db
-
-    audio_cfg = cfg.get("audio", {})
-    filter_cfg = cfg.get("filter", {})
-
-    threshold = AdaptiveThreshold(
-        initial_threshold_db=cfg.get("detection", {}).get("threshold_db", -30),
-    )
-    saved_noise = cfg.get("detection", {}).get("noise_floor_db")
-    saved_peak = cfg.get("detection", {}).get("slam_peak_db")
-    if saved_noise is not None and saved_peak is not None:
-        threshold.set_from_calibration(saved_noise, saved_peak, cfg.get('detection', {}).get('threshold_db'))
-
-    sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
-    print(f"[tabletap monitor] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB")
-    print("[tabletap monitor] Watching mic levels... (Ctrl+C to stop)\n")
-
-    try:
-        with MicCapture(audio_cfg, filter_cfg) as mic:
-            while True:
-                raw, filtered = mic.read_filtered()
-                db = rms_db(filtered)
-                spike = " <-- SPIKE!" if db > threshold.threshold_db + sensitivity_offset else ""
-
-                bar_db = max(0, db + 100)
-                bar_len = int(bar_db / 2)
-                bar = "#" * min(bar_len, 50)
-
-                print(f"\r  {db:6.1f} dB |{bar.ljust(50)}|{spike}", end="", flush=True)
-    except KeyboardInterrupt:
-        print("\n\n[tabletap monitor] Stopped.")
-
-
-def test_cmd(cfg: dict, duration: int):
-    import time
-    from .mic import MicCapture, rms_db
-    from .pattern import PatternDetector
-    from .filter import ImpactDetector, is_broadband_noise
-
-    print(f"[tabletap test] Testing tap detection for {duration} seconds...")
-    print("[tabletap test] Detected patterns will be printed (no actions executed)\n")
-
-    audio_cfg = cfg.get("audio", {})
-    filter_cfg = cfg.get("filter", {})
-    detect_cfg = cfg.get("detection", {})
-    sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
-
-    threshold = AdaptiveThreshold(
-        initial_threshold_db=detect_cfg.get("threshold_db", -30),
-        noise_alpha=filter_cfg.get("noise_alpha", 0.05),
-        peak_alpha=filter_cfg.get("peak_alpha", 0.1),
-        snr_gate_db=filter_cfg.get("snr_gate_db", 6.0),
-    )
-    saved_noise = detect_cfg.get("noise_floor_db")
-    saved_peak = detect_cfg.get("slam_peak_db")
-    if saved_noise is not None and saved_peak is not None:
-        threshold.set_from_calibration(saved_noise, saved_peak, detect_cfg.get('threshold_db'))
-
-    pattern_detector = PatternDetector(
-        min_gap_ms=detect_cfg.get("min_gap_ms", 150),
-        rhythm_window_ms=detect_cfg.get("rhythm_window_ms", 800),
-        long_press_ms=detect_cfg.get("long_press_ms", 500),
-        medium_hold_ms=detect_cfg.get("medium_hold_ms", 2000),
-        long_hold_ms=detect_cfg.get("long_hold_ms", 4000),
-        hold_repeat_ms=detect_cfg.get("hold_repeat_ms", 500),
-        enable_hold=detect_cfg.get("enable_hold_gestures", False),
-    )
-    impact = ImpactDetector(
-        min_gap_ms=detect_cfg.get("min_gap_ms", 150),
-        max_width_ms=detect_cfg.get("max_impact_ms", 220),
-        min_attack_db=detect_cfg.get("min_attack_db", 7.0),
-    )
-
-    print(f"[tabletap test] Threshold: {threshold.threshold_db + sensitivity_offset:.1f} dB\n")
-
-    start_time = time.time()
-    try:
-        with MicCapture(audio_cfg, filter_cfg) as mic:
-            while time.time() - start_time < duration:
-                raw, filtered = mic.read_filtered()
-                db = rms_db(filtered)
-                now = time.monotonic()
-
-                is_spike = bool(float(db) > threshold.threshold_db + sensitivity_offset)
-                # Keep the onset baseline updated during silence too.
-                limit = threshold.threshold_db + sensitivity_offset
-                broadband = bool(
-                    detect_cfg.get("broadband_guard", True)
-                    and db > limit - 12.0
-                    and rms_db(raw) > threshold.noise_floor_db + 14.0
-                    and is_broadband_noise(raw, audio_cfg.get("sample_rate", 44100))
-                )
-                if broadband:
-                    pattern_detector.reset()
-                confirmed = impact.feed(db, limit, now, broadband=broadband)
-                if confirmed:
-                    pattern_detector.feed()
-                if not is_spike:
-                    pattern_detector.on_silence()
-                threshold.update(db, is_spike)
-                event = pattern_detector.check_window_timeout()
-                if event and (event.key() != "quadruple" or detect_cfg.get("enable_four_taps", False)):
-                    timestamp = time.strftime("%H:%M:%S")
-                    print(f"\n[{timestamp}] Detected: {event.key().upper()}")
-                bar_db = max(0, db + 100)
-                bar_len = int(bar_db / 2)
-                bar = "#" * min(bar_len, 50)
-                spike = " <-- SPIKE!" if is_spike else ""
-                
-                elapsed = int(time.time() - start_time)
-                remaining = duration - elapsed
-                print(f"\r  [{remaining:2d}s] {db:6.1f} dB (thr: {threshold.threshold_db + sensitivity_offset:.1f}) |{bar.ljust(50)}|{spike}", end="", flush=True)
-
-    except KeyboardInterrupt:
-        pass
-
-    print("\n\n[tabletap test] Test completed.")
+def preview_cmd(config_path=None, duration=None):
+    """Use exactly the same detector and lock as preview in the TUI."""
+    from .bridge import run_bridge
+    def event(kind, **fields):
+        if kind == "level":
+            db = fields["db"]
+            bar = "#" * max(0, min(50, int((db + 100) / 2)))
+            print(f"\r  {db:6.1f} dB |{bar.ljust(50)}| threshold {fields['threshold_db']:.1f}", end="", flush=True)
+        elif kind == "gesture":
+            print(f"\nDetected: {fields['pattern'].upper()} (preview)")
+        elif kind == "error":
+            print("\n[tabletap] " + fields["message"], file=sys.stderr)
+        elif kind == "stopped":
+            print("\n[tabletap] Preview stopped.")
+    print("[tabletap] Safe preview; no actions execute. Ctrl+C to stop.")
+    return run_bridge(config_path=config_path, dry_run=True, event_sink=event, duration=duration)
 
 
 def main():
@@ -158,7 +54,12 @@ def main():
 
     start_p = sub.add_parser("start", help="Start the tabletap daemon")
     start_p.add_argument("-c", "--config", help="Path to config.yaml")
-    start_p.add_argument("--category", help="Action category to use (productivity, multitasking, smart_home, media)")
+    start_p.add_argument("--category", help="Action category to use (productivity, multitasking, media)")
+    start_p.add_argument("--preview", action="store_true", help="Start the background service with actions disabled")
+    control_p = sub.add_parser("control", help="Control or watch the running background listener")
+    control_p.add_argument("operation", choices=("status","watch","safe","stop","reload","arm"))
+    control_p.add_argument("--category")
+    control_p.add_argument("--seconds", type=float, default=600)
 
     mon_p = sub.add_parser("monitor", help="Watch mic levels and spikes in real-time")
     mon_p.add_argument("-c", "--config", help="Path to config.yaml")
@@ -182,9 +83,11 @@ def main():
 
     sub.add_parser("status", help="Show current config and device info")
     sub.add_parser("setup", help="Initialize config and install OpenTUI dependencies")
+    sub.add_parser("actions", help="List built-in actions and local capability checks")
     sub.add_parser("doctor", help="Check microphone, shortcuts, config, and OpenTUI installation")
     service_p = sub.add_parser("service", help="Manage optional background systemd user-service integration")
     service_p.add_argument("service_action", choices=("install", "uninstall", "path"))
+    service_p.add_argument("--live", action="store_true", help="Explicitly enable persistent live actions for an installed service")
     devices_p = sub.add_parser("devices", help="List available microphone input devices")
     devices_p.add_argument("--json", action="store_true", help="Machine-readable microphone list")
     bridge_p = sub.add_parser("bridge", help=argparse.SUPPRESS)
@@ -193,6 +96,13 @@ def main():
     bridge_p.add_argument("--dry-run", action="store_true", help="Detect but do not execute")
     bridge_p.add_argument("--max-live-seconds", type=float, help=argparse.SUPPRESS)
     bridge_p.add_argument("--calibrate", action="store_true", help="Stream calibration progress")
+    acoustic_p = sub.add_parser("acoustic", help="Manage microphone/desk calibration and labeled feedback")
+    acoustic_p.add_argument("operation", choices=("list", "device", "use", "feedback", "propose", "apply", "rollback"))
+    acoustic_p.add_argument("value", nargs="?")
+    acoustic_p.add_argument("-c", "--config")
+    acoustic_p.add_argument("--label", choices=("tap", "noise"))
+    acoustic_p.add_argument("--db", type=float)
+    acoustic_p.add_argument("--accepted", action="store_true")
     tui_p = sub.add_parser("tui", help="Launch OpenTUI terminal dashboard")
     tui_p.add_argument("--demo", action="store_true", help="Preview TUI without opening the microphone")
 
@@ -206,6 +116,43 @@ def main():
     if args.command is None:
         args.command = "tui"
         args.demo = False
+
+    if args.command == "control":
+        import json
+        from .ipc import control_request, watch_events
+        try:
+            if args.operation == "watch":
+                for event in watch_events():
+                    print(event, flush=True)
+            else:
+                request = {"command":args.operation}
+                if args.operation == "arm": request["seconds"] = args.seconds
+                if args.operation == "reload": request["category"] = args.category
+                response = control_request(request)
+                print(json.dumps(response))
+                if "error" in response: sys.exit(1)
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"error":str(exc)}))
+            sys.exit(1)
+        except KeyboardInterrupt:
+            pass
+        return
+
+    if args.command == "actions":
+        import json
+        from .native_actions import action_catalog
+        print(json.dumps(action_catalog(), indent=2))
+        return
+
+    if args.command == "acoustic":
+        import json
+        from .acoustic_cli import acoustic_command
+        try:
+            print(json.dumps(acoustic_command(args)))
+        except (ValueError, OSError, RuntimeError, TypeError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            sys.exit(1)
+        return
 
     if args.command == "audit":
         from .audit import observe_work, format_audit
@@ -227,7 +174,7 @@ def main():
         if args.service_action == "path":
             print(user_service_path())
         elif args.service_action == "install":
-            path = install_user_service(sys.executable)
+            path = install_user_service(sys.executable, live=args.live)
             print(f"[tabletap] Created {path} (uses {sys.executable})")
             print("Run: systemctl --user daemon-reload")
             print("Then: systemctl --user enable --now tabletap.service")
@@ -264,7 +211,6 @@ def main():
         return
 
     if args.command in ("setup", "doctor"):
-        from .config import init_config
         from .config import validate_config
         dest = init_config()
         bun = shutil.which("bun")
@@ -306,6 +252,9 @@ def main():
             keytool = shutil.which("xdotool")
             missing = "MISSING (install xdotool)"
         print("  Key tool: " + (keytool or missing))
+        from .native_actions import action_catalog
+        catalog = action_catalog()
+        print(f"  Built-in actions available: {sum(not item['unavailable'] for item in catalog)}/{len(catalog)} (tabletap actions)")
         try:
             from .mic import pyaudio
             if pyaudio is None:
@@ -339,10 +288,10 @@ def main():
         if not ui.exists():
             print("[tabletap] TUI sources missing from the installed Python package.", file=sys.stderr)
             sys.exit(1)
-        from .config import init_config
         init_config()
         env = os.environ.copy()
         env["TABLETAP_PYTHON"] = sys.executable
+        env["TABLETAP_VERSION"] = __version__
         cmd = [bun, "run", str(ui)]
         if args.demo:
             cmd.append("--demo")
@@ -373,31 +322,42 @@ def main():
     )
 
     if args.command == "start":
-        daemon = Daemon(cfg, category=args.category if hasattr(args, 'category') else None)
-        daemon.run()
+        sys.exit(run_service(args.config, args.category, preview=args.preview))
 
     elif args.command == "monitor":
-        monitor_cmd(cfg)
+        sys.exit(preview_cmd(args.config))
 
     elif args.command == "test":
-        test_cmd(cfg, args.duration)
+        sys.exit(preview_cmd(args.config, args.duration))
 
     elif args.command == "calibrate":
-        result = calibrate(cfg, duration_sec=args.duration if hasattr(args, "duration") else None)
-        
-        if not args.no_save:
-            config_path = save_calibration(cfg, result, args.config if hasattr(args, "config") else None)
-            print(f"\n✓ Calibration saved to {config_path}")
-            print(f"\nCalibration values:")
-            print(f"  noise_floor_db: {result['noise_floor_db']}")
-            print(f"  slam_peak_db: {result['slam_peak_db']}")
-            print(f"  threshold_db: {result['threshold_db']}")
-        else:
-            print(f"\nCalibration results (not saved):")
-            print(f"  detection:")
-            print(f"    noise_floor_db: {result['noise_floor_db']}")
-            print(f"    slam_peak_db: {result['slam_peak_db']}")
-            print(f"    threshold_db: {result['threshold_db']}")
+        from .lock import PIDLock
+        lock = PIDLock()
+        if not lock.acquire():
+            parser.error("Stop the TableTap listener before calibration")
+        try:
+            from .acoustic_profiles import device_identity
+            identity = None if args.no_save else device_identity(cfg)
+            result = calibrate(cfg, duration_sec=args.duration if hasattr(args, "duration") else None)
+            
+            if not args.no_save:
+                config_path = save_calibration(cfg, result, args.config if hasattr(args, "config") else None, identity=identity)
+                print(f"\n✓ Calibration saved to {config_path}")
+                print(f"\nCalibration values:")
+                print(f"  noise_floor_db: {result['noise_floor_db']}")
+                print(f"  slam_peak_db: {result['slam_peak_db']}")
+                print(f"  threshold_db: {result['threshold_db']}")
+            else:
+                print(f"\nCalibration results (not saved):")
+                print(f"  detection:")
+                print(f"    noise_floor_db: {result['noise_floor_db']}")
+                print(f"    slam_peak_db: {result['slam_peak_db']}")
+                print(f"    threshold_db: {result['threshold_db']}")
+
+        except (OSError, ValueError, RuntimeError) as exc:
+            parser.error(str(exc))
+        finally:
+            lock.release()
 
     elif args.command == "status":
         print("[tabletap] Current config:")

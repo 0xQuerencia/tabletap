@@ -15,8 +15,9 @@ import time
 import yaml
 
 from .action import ActionRunner
-from .config import init_config, load_config
-from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
+from .acoustic_profiles import verify_live, device_identity
+from .config import init_config, load_config, DEFAULT_PATHS
+from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise, effective_threshold
 from .lock import PIDLock
 from .mic import MicCapture, MicDisconnected, rms_db
 from .pattern import PatternDetector
@@ -40,29 +41,52 @@ def emit(kind: str, **fields) -> None:
         sys.stdout.flush()
 
 
-def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None) -> int:
+def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None, *, control=None, held_lock=None, event_sink=None, duration=None) -> int:
     """Listen continuously, report live levels/gestures, and execute mapped actions.
 
     A lock prevents a TUI bridge from racing the old systemd daemon.
     """
+    def report(kind, **fields):
+        if event_sink is not None:
+            event_sink(kind, **fields)
+        elif control is None:
+            emit(kind, **fields)
+        else:
+            control.publish(kind, **fields)
+            if kind in ("error", "gesture", "action_result", "ready", "live_expired"):
+                log.info("%s: %s", kind, fields)
     try:
         if config_path is None:
             init_config()
         cfg = load_config(config_path)
     except (OSError, ValueError, yaml.YAMLError) as exc:
-        emit("error", message=f"Cannot load TableTap config: {exc}")
+        report("error", message=f"Cannot load TableTap config: {exc}")
+        return 2
+    if duration is not None and (not dry_run or not 0 < duration <= 600):
+        report("error", message="Preview duration must be between 0 and 600 seconds")
         return 2
     if live_seconds is not None:
         if dry_run or not 0 < live_seconds <= 600:
-            emit("error", message="A live authorization must be between 0 and 600 seconds, and cannot be used with --dry-run")
+            report("error", message="A live authorization must be between 0 and 600 seconds, and cannot be used with --dry-run")
+            return 2
+    if not dry_run:
+        try:
+            if control is not None and not all(cfg.get("detection", {}).get(k) is not None for k in ("threshold_db", "noise_floor_db", "slam_peak_db")):
+                raise ValueError("Calibrate before arming the background listener")
+            verify_live(cfg)
+        except (OSError, ValueError, RuntimeError) as exc:
+            report("error", message=str(exc))
             return 2
     audio = cfg.get("audio", {})
     filter_cfg = cfg.get("filter", {})
     detection = cfg.get("detection", {})
     sensitivity_offset = float(filter_cfg.get("sensitivity_offset_db", 0.0))
+    managed = bool(cfg.get("calibration", {}).get("device_key"))
+    def limit_db():
+        return effective_threshold(threshold.threshold_db, sensitivity_offset, detection, managed)
 
     if category is not None and category not in cfg.get("actions", {}):
-        emit("error", message=f"Unknown category: {category}")
+        report("error", message=f"Unknown category: {category}")
         return 2
 
     threshold = AdaptiveThreshold(
@@ -70,6 +94,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
         noise_alpha=filter_cfg.get("noise_alpha", 0.05),
         peak_alpha=filter_cfg.get("peak_alpha", 0.1),
         snr_gate_db=filter_cfg.get("snr_gate_db", 6.0),
+        use_calibrated_floor=managed,
     )
     noise = detection.get("noise_floor_db")
     peak = detection.get("slam_peak_db")
@@ -79,11 +104,6 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     pattern = PatternDetector(
         min_gap_ms=detection.get("min_gap_ms", 150),
         rhythm_window_ms=detection.get("rhythm_window_ms", 800),
-        long_press_ms=detection.get("long_press_ms", 500),
-        medium_hold_ms=detection.get("medium_hold_ms", 2000),
-        long_hold_ms=detection.get("long_hold_ms", 4000),
-        hold_repeat_ms=detection.get("hold_repeat_ms", 500),
-        enable_hold=detection.get("enable_hold_gestures", False),
     )
     impact = ImpactDetector(
         min_gap_ms=detection.get("min_gap_ms", 150),
@@ -93,57 +113,70 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
     runner = ActionRunner(
         cfg.get("actions", {}),
         category=category,
-        on_result=lambda pattern, status, message: emit(
+        on_result=lambda pattern, status, message: report(
             "action_result", pattern=pattern, status=status, message=message
         ),
     )
-    lock = PIDLock()
-    if not lock.acquire():
-        emit("error", message="Another TableTap listener is already running")
+    lock = held_lock or PIDLock()
+    if held_lock is None and not lock.acquire():
+        report("error", message="Another TableTap listener is already running")
         runner.shutdown()
         return 3
 
     running = True
+    if control is not None:
+        control.set_runner(runner)
 
     def stop(_signum, _frame):
         nonlocal running
         running = False
+        runner.cancel()
+        if control is not None:
+            control.signal_stop()
 
     previous_int = signal.signal(signal.SIGINT, stop)
     previous_term = signal.signal(signal.SIGTERM, stop)
+    previous_hup = signal.signal(signal.SIGHUP, lambda *_: control.signal_reload()) if control is not None else None
 
     def handle(event):
-        if event is None:
+        if event is None or (control is not None and control.interrupted.is_set()):
             return
         key = event.key()
         if key == "quadruple" and not detection.get("enable_four_taps", False):
-            emit("rejected", reason="four-tap gesture disabled for safety")
+            report("rejected", reason="four-tap gesture disabled for safety")
             return
         action = runner._get_action(key)
         name = action.get("name") or action.get("value") if action else "unmapped"
         executable = isinstance(action, dict) and bool(str(action.get("value", "")).strip())
-        emit("gesture", pattern=key, action=name, dispatched=executable and not dry_run)
+        report("gesture", pattern=key, action=name, dispatched=executable and not dry_run)
         if executable and not dry_run:
             runner.run(key)
 
     try:
         with MicCapture(audio, filter_cfg) as mic:
-            emit(
+            report(
                 "ready", category=category or "default",
-                dry_run=dry_run, threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
+                dry_run=dry_run, threshold_db=round(limit_db(), 1),
+                **({"config_path":str(__import__("pathlib").Path(config_path or DEFAULT_PATHS[0]).absolute())} if control is not None else {}),
             )
             last_level_at = 0.0
             deadline = time.monotonic() + live_seconds if live_seconds is not None else None
-            while running:
+            runner.deadline = deadline
+            preview_end = time.monotonic() + duration if duration is not None else None
+            while running and not (control is not None and control.interrupted.is_set()):
                 # Enforced inside the Python action-capable process, even if
                 # the terminal UI freezes or its timer never gets CPU time.
+                if preview_end is not None and time.monotonic() >= preview_end:
+                    break
                 if deadline is not None and time.monotonic() >= deadline:
-                    emit("live_expired", message="Live action authorization expired")
+                    report("live_expired", message="Live action authorization expired")
                     break
                 raw, filtered = mic.read_filtered()
+                if control is not None and control.interrupted.is_set():
+                    break
                 db = float(rms_db(filtered))
                 now = time.monotonic()
-                limit = threshold.threshold_db + sensitivity_offset
+                limit = limit_db()
                 spike = bool(db > limit)
                 broadband = bool(
                     detection.get("broadband_guard", True)
@@ -157,33 +190,42 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
                 # otherwise leaves the onset detector with stale energy.
                 confirmed = impact.feed(db, limit, now, broadband=broadband)
                 if confirmed:
-                    handle(pattern.feed())
-                if not spike:
-                    handle(pattern.on_silence())
+                    if dry_run and impact.confirmed_peak is not None:
+                        report("impact_sample", db=round(impact.confirmed_peak, 1), accepted=True)
+                    pattern.feed()
                 if impact.rejected_reason and impact.rejected_reason != "echo / too close":
-                    emit("rejected", reason=impact.rejected_reason)
+                    report("rejected", reason=impact.rejected_reason,
+                         db=round(db, 1), threshold_db=round(limit, 1))
+                if impact.near_miss is not None:
+                    report("near_miss", **impact.near_miss)
                 threshold.update(db, spike)
                 handle(pattern.check_window_timeout())
                 if now - last_level_at >= 0.1:
-                    emit(
+                    report(
                         "level", db=round(db, 1),
-                        threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
+                        threshold_db=round(limit_db(), 1),
                         spike=spike,
                     )
                     last_level_at = now
     except (MicDisconnected, OSError, ImportError) as exc:
-        emit("error", message=str(exc))
+        report("error", message=str(exc))
         return 1
     except Exception as exc:
         log.exception("Audio bridge crashed")
-        emit("error", message=str(exc))
+        report("error", message=str(exc))
         return 1
     finally:
         runner.shutdown()
-        lock.release()
+        if control is not None:
+            control.set_runner(None)
+        if held_lock is None:
+            lock.release()
         signal.signal(signal.SIGINT, previous_int)
         signal.signal(signal.SIGTERM, previous_term)
-        emit("stopped")
+        if control is None:
+            report("stopped")
+        else:
+            signal.signal(signal.SIGHUP, previous_hup)
     return 0
 
 
@@ -225,9 +267,10 @@ def run_calibration(config_path=None) -> int:
     try:
         # calibrate() includes human-readable prompts for the old CLI. Keep
         # them on stderr so stdout remains a JSONL-only protocol for OpenTUI.
+        identity = device_identity(cfg)
         with redirect_stdout(sys.stderr):
             result = calibrate(cfg, progress=progress)
-        save_calibration(cfg, result, config_path)
+        save_calibration(cfg, result, config_path, identity=identity)
         print(json.dumps({"type": "calibration_done", **result}),
               file=output, flush=True)
         return 0

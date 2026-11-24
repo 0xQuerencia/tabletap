@@ -45,6 +45,7 @@ class AdaptiveThreshold:
         peak_alpha: float = 0.1,
         snr_gate_db: float = 6.0,
         min_threshold_db: float = -60,
+        use_calibrated_floor: bool = False,
     ):
         self.noise_floor_db = initial_threshold_db - 10
         self.peak_db = initial_threshold_db + 5
@@ -55,6 +56,7 @@ class AdaptiveThreshold:
         self.min_threshold_db = min_threshold_db
         self._active = False
         self.calibration_floor_db = None
+        self.use_calibrated_floor = use_calibrated_floor
 
     def update(self, db: float, is_spike: bool):
         if is_spike:
@@ -65,7 +67,7 @@ class AdaptiveThreshold:
             self._active = False
 
         gap = self.peak_db - self.noise_floor_db
-        if gap >= self.snr_gate_db and self._active:
+        if gap >= self.snr_gate_db and self._active and not (self.use_calibrated_floor and self.calibration_floor_db is not None):
             self.threshold_db = self.noise_floor_db + gap * 0.35
         else:
             self.threshold_db = self.noise_floor_db + self.snr_gate_db
@@ -91,7 +93,9 @@ class AdaptiveThreshold:
         # reclassify quiet keyboard sounds as desk taps.
         if threshold_db is not None:
             self.calibration_floor_db = float(threshold_db)
-            self.threshold_db = max(self.threshold_db, self.calibration_floor_db)
+            if self.use_calibrated_floor:
+                self.threshold_db = noise_floor_db + self.snr_gate_db
+            self.threshold_db = max(self.threshold_db, self.calibration_floor_db, self.min_threshold_db)
 
     def get_state(self) -> dict:
         return {
@@ -115,14 +119,20 @@ class ImpactDetector:
         self.min_attack_db = float(min_attack_db)
         self._previous_db = None
         self._pending_since = None
+        self._pending_peak = None
+        self.confirmed_peak = None
         self._last_accepted_at = float("-inf")
         self._armed = True
         self.rejected_reason = None
+        self.near_miss = None
+        self._last_near_miss = float("-inf")
         self._noise_block_until = float("-inf")
 
     def feed(self, db: float, threshold_db: float, now: float,
              broadband: bool = False) -> bool:
         self.rejected_reason = None
+        self.near_miss = None
+        self.confirmed_peak = None
         rise = 0.0 if self._previous_db is None else db - self._previous_db
         self._previous_db = db
         if broadband:
@@ -137,6 +147,7 @@ class ImpactDetector:
         active = db > threshold_db
         if self._pending_since is not None:
             if active:
+                self._pending_peak = max(self._pending_peak, db)
                 if now - self._pending_since > self.max_width:
                     self.rejected_reason = "sustained noise"
                     self._pending_since = None
@@ -151,14 +162,25 @@ class ImpactDetector:
                 self.rejected_reason = "echo / too close"
                 return False
             self._last_accepted_at = now
+            self.confirmed_peak = self._pending_peak
             return True
 
         if not active:
+            if (self._armed and rise >= self.min_attack_db
+                    and 0 <= threshold_db - db <= 6
+                    and now - self._last_near_miss >= self.min_gap):
+                self.near_miss = {
+                    "db": round(db, 1),
+                    "threshold_db": round(threshold_db, 1),
+                    "attack_db": round(rise, 1),
+                }
+                self._last_near_miss = now
             self._armed = True
         elif self._armed:
             self._armed = False
             if rise >= self.min_attack_db:
                 self._pending_since = now
+                self._pending_peak = db
             else:
                 self.rejected_reason = "slow onset"
         return False
@@ -181,3 +203,11 @@ def is_broadband_noise(raw: np.ndarray, sample_rate: int) -> bool:
     low = power[(frequencies >= 80) & (frequencies <= 800)].sum()
     high = power[(frequencies >= 1200) & (frequencies <= 4500)].sum()
     return bool(low > 0 and high > low * 0.08)
+
+
+def effective_threshold(threshold_db: float, offset: float, detection: dict, managed: bool) -> float:
+    """Manual sensitivity cannot bypass the measured work-noise margin on a managed profile."""
+    limit = threshold_db + offset
+    if managed:
+        limit = max(limit, detection.get("work_peak_db", -120) + 4, detection.get("noise_floor_db", -120) + 6)
+    return limit

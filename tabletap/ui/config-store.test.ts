@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField, updateConfigAction,
+  createActionProfile, clearAction, deleteActionProfile,
 } from "./config-store.ts"
 
 function fixture() {
@@ -128,4 +129,39 @@ test("builder rejects invalid or demo updates before touching YAML", () => {
     expect(() => updateConfigAction(path, "media", "notnumeric", { ...bad, value: "xdg-open ." })).toThrow(/numbered/)
     expect(readFileSync(path, "utf8")).toBe(before)
   } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test("empty profiles expose slots and support independent clone and menu mappings", () => {
+  const {dir,path}=fixture()
+  try {
+    let cfg=createActionProfile(path,"study")
+    expect(getProfiles(cfg)).toContain("study")
+    expect(getActionRows(cfg,"study").map(([k])=>k)).toEqual(["1","2","3","4"])
+    cfg=updateConfigAction(path,"study","5",{name:"Play",type:"builtin",value:"media.play_pause"})
+    expect(getActionRows(cfg,"study")[4]?.[1].value).toBe("media.play_pause")
+    cfg=createActionProfile(path,"copy","study")
+    expect(getActionRows(cfg,"copy")[4]?.[1].value).toBe("media.play_pause")
+    cfg=clearAction(path,"study","5")
+    expect(getActionRows(cfg,"study")).toHaveLength(4)
+    expect(getActionRows(cfg,"copy")).toHaveLength(5)
+    cfg=deleteActionProfile(path,"study")
+    expect(getProfiles(cfg)).not.toContain("study")
+    expect(()=>createActionProfile(path,"__proto__")).toThrow()
+    expect(()=>createActionProfile(path,"copy")).toThrow()
+    expect(()=>createActionProfile(path,"demo",undefined,true)).toThrow(/read-only/)
+  } finally {rmSync(dir,{recursive:true,force:true})}
+})
+test("cannot delete a profile referenced by a launcher",()=>{
+  const {dir,path}=fixture()
+  try {
+    updateConfigAction(path,"default","single",{name:"Media",type:"launcher",value:"media"})
+    expect(()=>deleteActionProfile(path,"media")).toThrow(/launcher/)
+  } finally {rmSync(dir,{recursive:true,force:true})}
+})
+
+
+test("old hold mappings are not shown or editable as gestures", () => {
+  const config = {actions:{single:{type:"exec" as const,value:"foot"},long:{type:"exec" as const,value:"old-command"}},detection:{enable_hold_gestures:true}}
+  expect(getActionRows(config,"default").map(([key])=>key)).toEqual(["single","double","triple","quadruple"])
+  expect(()=>actionFieldPath("default","long","value")).toThrow(/Invalid gesture/)
 })

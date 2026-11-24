@@ -95,8 +95,7 @@ and scripts before enabling listening. Tap gestures are not authentication.
 **Current limitations:** Distinguishing real desk taps from nearby typing needs
 real microphone and terminal testing. If working noise is as loud as tapping,
 calibration will refuse to save new settings rather than silently turn normal
-keyboard clicks into actions. Hold-duration gestures remain
-experimental, and accessibility/noise robustness varies with microphone,
+keyboard clicks into actions. Recognition varies with microphone,
 table surface, and room conditions.
 
 ---
@@ -105,7 +104,7 @@ Turn your desk into a button pad using the laptop's built-in microphone. Tap the
 
 ## How it works
 
-tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple/quadruple). Experimental hold recognition is off by default. Events are mapped to keyboard shortcuts, app launches, or custom scripts.
+tabletap listens to your mic, filters out noise with a bandpass filter (50-800Hz), and detects percussive impacts using adaptive thresholds. Detected taps are classified by rhythm (single/double/triple/quadruple). Events are mapped to keyboard shortcuts, app launches, or custom scripts.
 
 No extra hardware needed. Just your laptop mic and a hard desk surface.
 
@@ -124,9 +123,10 @@ systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS
 systemctl --user enable --now tabletap.service
 ```
 
-This mode **executes configured actions** instead of running the TUI's
-safe-preview mode, so review your mappings before enabling it. Stop the
-service before starting the TUI: `systemctl --user stop tabletap.service`.
+The service starts in **safe preview** by default. Open the TUI to attach to
+that listener, see its status and explicitly authorize actions. Use
+`tabletap service install --live` only if you deliberately want persistent
+live actions after a clean calibration and work-noise audit.
 To retire it, run `systemctl --user disable --now tabletap.service`, then
 `.venv/bin/tabletap service uninstall` and
 `systemctl --user daemon-reload`. The obsolete checked-in
@@ -141,13 +141,15 @@ has been replaced by this portable installer.
 .venv/bin/tabletap start         # start listening (headless)
 ```
 
-The interactive TUI starts in a safe stopped state. Press `c` for guided calibration; `tabletap start` (headless daemon) auto-calibrates when no saved calibration is present.
+The interactive TUI starts in a safe stopped state or attaches to the existing service. Press `c` for guided calibration. Headless live listening requires saved calibration; use `tabletap start --preview` to listen without execution.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `tabletap start` | Start the daemon (auto-calibrates on first run) |
+| `tabletap start` | Start live headless listener using existing calibration |
+| `tabletap start --preview` | Start safe headless preview |
+| `tabletap control status` | Inspect background service state |
 | `tabletap start --category productivity` | Start with a specific action category |
 | `tabletap calibrate` | Recalibrate noise floor and slam threshold |
 | `tabletap calibrate --no-save` | Dry-run calibration without saving |
@@ -169,8 +171,6 @@ The interactive TUI starts in a safe stopped state. Press `c` for guided calibra
 | Double tap | 2 taps within 800ms | Open Gmail |
 | Triple tap | 3 taps within 800ms | Open YouTube |
 | Four taps | 4 taps within 800ms | **Disabled by default** (opt in with Settings `f`; existing Alt+Tab mapping is not armed) |
-
-Hold-duration gestures have experimental mappings in the configuration but are **disabled by default** because acoustic input cannot reliably measure physical pressure.
 
 ## Configuration
 
@@ -196,13 +196,8 @@ detection:
   min_gap_ms: 150
   rhythm_window_ms: 800
   enable_four_taps: false
-  enable_hold_gestures: false
   min_attack_db: 7.0
   max_impact_ms: 220
-  long_press_ms: 500
-  medium_hold_ms: 2000
-  long_hold_ms: 4000
-  hold_repeat_ms: 500
 
 actions:
   single:
@@ -214,18 +209,6 @@ actions:
   triple:
     type: exec
     value: "xdg-open https://youtube.com"
-  long:
-    type: key
-    value: alt+tab
-  medium:
-    type: exec
-    value: "pactl set-sink-volume @DEFAULT_SINK@ +5%"
-  extended:
-    type: exec
-    value: "loginctl lock-session"
-  repeat:
-    type: exec
-    value: "pactl set-sink-volume @DEFAULT_SINK@ +2%"
 
 feedback:
   notifications: true
@@ -239,6 +222,18 @@ feedback:
 | `key` | Press keyboard shortcut | `alt+tab`, `ctrl+shift+t`, `super+left` |
 | `exec` | Run a command | `spotify`, `xdg-open https://...` |
 | `script` | Run a bash script | `~/.local/bin/my-script.sh` |
+
+### Built-in action library
+
+In the Action Builder choose type **builtin**, then cycle the presets. Media controls use playerctl (MPRIS), audio controls use pactl, brightness uses brightnessctl and Hyprland controls require a Hyprland session. Missing tools produce a clear action failure; nothing is installed automatically. Toggle actions delegate to the actual system/player state, not a counter. Example YAML:
+
+```yaml
+actions:
+  double:
+    name: Toggle microphone
+    type: builtin
+    value: audio.mic_toggle
+```
 
 ### Action categories
 
@@ -395,7 +390,7 @@ From the command palette: `/arm` then `/confirm`, `/safe` to
 switch to preview, and `/panic` to stop microphone listening.
 
 **Scope:** This guard is for the interactive TUI. Explicitly enabling
-`tabletap start` or the optional always-on systemd user service
+`tabletap start` or the systemd service explicitly installed with `--live`
 runs commands without TUI arming; don't enable that service until your
 work-noise audit is clean.
 
@@ -456,3 +451,69 @@ the builder is read-only and cannot save changes. The palette command
 `/builder` opens the builder for the selected action.
 
 The default three-tap map and hardware detection remain unchanged.
+
+### Sequential workflows
+
+Choose **workflow** in the Action Builder, select Steps and press Enter. Add with A, delete with D, select with J/K, reorder with Ctrl+arrow, change type with left/right, choose a preset with P and edit the selected step with Enter. S applies the draft, then S in Action Builder saves atomically. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait.
+
+```yaml
+actions:
+  triple:
+    name: Coding session
+    type: workflow
+    value: '[{"type":"exec","value":"code"},{"type":"wait","value":500},{"type":"exec","value":"foot"}]'
+```
+
+### Gesture launcher
+
+Install one optional desktop menu utility: `fuzzel`, `wofi` or `rofi` on Wayland, or `rofi` / `dmenu` on X11. In the Action Builder select **launcher**, then select an existing named profile from its presets. A live authorized tap opens a searchable menu of the profile's numbered actions (up to 20). Use the keyboard or your menu utility's normal selection controls. Closing the menu does nothing; stopping/disarming the listener or authorization expiry cancels the menu. A menu can launch a workflow, but cannot recursively launch another menu. Safe preview never opens it. Menu appearance follows your installed launcher rather than adding another GUI framework.
+
+### Missed-tap diagnostics
+
+In safe preview, watch Activity for **Possible soft tap** events: a sharp onset within 6 dB below the current threshold. These are candidates, not confirmed taps, and never execute actions. Rejected-noise entries also show the measured level and threshold. If deliberate taps repeatedly appear here, recalibrate and include your normal softer taps; run the work-noise audit before arming. No raw audio is stored and the detection decisions are unchanged.
+
+### Personalized soft-tap calibration (opt-in)
+
+In Settings press **g** to select Personalized, then **c** to calibrate again. During the work phase type, speak and click as you normally do; during the tap phase make at least six separated soft and normal desk knocks. This mode fits a weak-tap reference from distinct sharp, short impacts and uses the maximum observed work-noise level plus a 4 dB margin as a hard floor. It refuses to save if fewer than six clean impacts are recognized or their energy overlaps work noise. Switching the setting alone does not alter saved thresholds until you recalibrate. Use safe preview and a new work-noise audit before arming. No raw audio is retained, and synthetic tests are not a hardware accuracy guarantee.
+
+### Desk profiles and feedback
+
+Use `/acoustic use desk-name` in the TUI (or `tabletap acoustic use desk-name` in a stopped session), then calibrate. Each named desk stores separate settings for each microphone identity and capture/filter configuration. Switching microphones in Settings loads the matching profile or requires new calibration before live actions. Unplugged/changed devices must be recalibrated; identical device names may not be distinguishable.
+
+In safe preview, open Activity and label the latest confirmed impact or possible missed tap with **T** (intentional tap) or **N** (noise). This saves only its level and label, stops listening, and does not change detection. Repeat to collect at least three missed taps or three false detections. Use `/acoustic propose` to inspect a bounded threshold adjustment and `/acoustic apply` to save it; the previous threshold is recoverable via `/acoustic rollback`. Test in preview and repeat the work-noise audit. Ambiguous labels are rejected rather than lowering the work-noise floor. No raw audio is saved. This is threshold feedback, not a source-separating speech model.
+
+### Desktop actions
+
+Built-ins cover media, audio, brightness, notifications, session locking and desktop shortcuts. `tabletap actions` lists supported IDs and local tool availability. Use generic key, exec or script mappings for other applications.
+
+### Shared background listener and local control
+
+`tabletap start --preview` runs the same recognition engine as the TUI and exposes a private Unix socket. The generated systemd service starts in safe preview by default; reinstall it using `tabletap service install --live` only when you explicitly want persistent, calibrated live actions. Use `tabletap control status`, `watch`, `safe`, `arm --seconds 600`, `reload --category media` or `stop`. Reload always disarms; live expiry returns to preview. The control protocol accepts only these commands and no arbitrary action data. Slow subscribers are disconnected without blocking audio. The old independent daemon loop was removed. Initial live mode now requires calibration, rather than auto-calibrating in an unattended background session.
+
+The TUI automatically attaches to a running background service, shows its actual preview/live state, and uses IPC to disarm, authorize, change profiles, and reload config. It does not start a second microphone stream. Opening or quitting the TUI does not implicitly enable actions; if it armed the attached service, quitting requests safe mode. Space, X or /stop stop the attached listener, not just its dashboard. Calibration and acoustic profile changes require exclusive microphone access and stop the service first; restart it when ready. Services using a custom config path can be monitored but not edited using the default-config TUI.
+
+## Action library and profile management
+
+Open Actions with **2** and press **B** or Enter. In the builder press **L**
+or select the preset field and press Enter to search the action library.
+Select an example with Enter, customize it, and press **S** to save. Nothing
+runs in the editor. Use `/profile new study` to create an empty profile,
+`/profile clone study-copy` to duplicate the active profile, or
+`/profile delete study-copy` to remove a named profile. Slots 1–4 correspond
+to tap counts; **A** adds a menu-only slot 5–20, **D** clears a mapping. A
+launcher can reference a named profile; referenced profiles cannot be deleted.
+Use `tabletap actions` for local availability checks.
+
+Profiles are ordinary YAML mappings. Share reviewed configuration snippets rather than installing executable mappings from untrusted sources.
+
+## Release candidate
+
+Version 1.0.0rc1 is a release candidate, not a claim of measured recognition
+accuracy. See [release verification](docs/RELEASE_CHECKLIST.md) before a stable
+release. Tagged releases build wheel and source artifacts, run Python and
+terminal checks, and publish a prerelease for RC tags. Linux remains the
+supported platform; desktop actions require their local tools.
+
+### Upgrading older configurations
+
+Existing YAML is not rewritten automatically. Old hold mappings and hold settings are ignored; remap those actions to tap counts if needed. Removed application-specific built-in IDs and non-sequential workflow steps fail validation instead of executing; replace them with generic commands, shortcuts or scripts.

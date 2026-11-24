@@ -3,8 +3,14 @@ import subprocess
 import shlex
 import shutil
 import logging
+import threading
+import time
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
+
+from .native_actions import execute_native
+from .workflow import parse_workflow
+from .launcher import profile_menu, choose_action
 
 try:
     import pynput
@@ -59,7 +65,12 @@ class ActionRunner:
         self.category = category
         self.on_result = on_result
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="action")
+        self._slots = threading.BoundedSemaphore(2)
         self.display_server = _detect_display_server()
+        self._cancelled = threading.Event()
+        self._workflow_lock = threading.Lock()
+        self._launcher_lock = threading.Lock()
+        self.deadline = None
         
         self._category_map = {}
         if category and category in actions_cfg:
@@ -70,21 +81,32 @@ class ActionRunner:
                         self._category_map[int(num)] = action
 
     def run(self, key: str):
+        if self._cancelled.is_set() or self._launcher_lock.locked():
+            return None
         action = self._get_action(key)
         if not isinstance(action, dict) or not str(action.get("value", "")).strip():
             return None
-        future = self._executor.submit(self._execute_action, action)
+        if not self._slots.acquire(blocking=False):
+            if self.on_result:
+                self.on_result(key, "failed", "Action workers busy; gesture dropped")
+            return None
+        try:
+            future = self._executor.submit(self._execute_action, action)
+        except RuntimeError:
+            self._slots.release()
+            return None
+        future.add_done_callback(lambda _: self._slots.release())
         if self.on_result is not None:
             def report(completed):
                 try:
-                    completed.result()
+                    result = completed.result()
                 except Exception as exc:
                     log.error("Action %s failed: %s", key, exc)
                     self.on_result(key, "failed", str(exc))
                 else:
                     # Successful spawn/keypress, not proof that a child process
                     # subsequently exited with zero status.
-                    self.on_result(key, "launched", "")
+                    self.on_result(key, "dismissed" if result == "dismissed" else "launched", "")
             future.add_done_callback(report)
         return future
 
@@ -94,11 +116,20 @@ class ActionRunner:
             return self._execute_action(action)
     
     def run_category(self, category: str, number: int):
+        if self._cancelled.is_set() or self._launcher_lock.locked():
+            return
         action = self.get_action(category, number)
         if action is None:
             return
         
-        self._executor.submit(self._execute_action, action)
+        if not self._slots.acquire(blocking=False):
+            return
+        try:
+            future = self._executor.submit(self._execute_action, action)
+        except RuntimeError:
+            self._slots.release()
+            return
+        future.add_done_callback(lambda _: self._slots.release())
     
     def get_action(self, category: str, number: int) -> dict[str, Any] | None:
         cat_actions = self.actions.get(category)
@@ -131,6 +162,7 @@ class ActionRunner:
         return action
     
     def _execute_action(self, action: dict[str, Any]):
+        self._check_authorized()
         action_type = action.get("type", "key")
         value = action.get("value", "")
         if not value:
@@ -142,8 +174,61 @@ class ActionRunner:
             self._launch(value)
         elif action_type == "script":
             self._run_script(value)
+        elif action_type == "builtin":
+            execute_native(value, press_key=self._press_key)
+        elif action_type == "workflow":
+            self._run_workflow(value)
+        elif action_type == "launcher":
+            return self._run_launcher(value)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
+
+    def _run_launcher(self, profile: str):
+        if not self._launcher_lock.acquire(blocking=False):
+            raise RuntimeError("An action launcher is already open")
+        try:
+            entries = profile_menu(self.actions, profile)
+            selected = choose_action(entries, self.display_server, self._check_authorized)
+            if selected is None:
+                return "dismissed"
+            self._check_authorized()
+            return self._execute_action(selected)
+        finally:
+            self._launcher_lock.release()
+
+    def _check_authorized(self):
+        if self._cancelled.is_set() or (self.deadline is not None and time.monotonic() >= self.deadline):
+            raise RuntimeError("Action cancelled: listener stopped or authorization expired")
+
+    def cancel(self):
+        self._cancelled.set()
+
+    def _run_workflow(self, value: str):
+        steps = parse_workflow(value)
+        if not self._workflow_lock.acquire(blocking=False):
+            raise RuntimeError("Another workflow is already running")
+        try:
+            for index, step in enumerate(steps, 1):
+                self._check_authorized()
+                try:
+                    self._run_step(step)
+                except Exception as exc:
+                    raise RuntimeError(f"Workflow step {index} failed: {exc}") from exc
+        finally:
+            self._workflow_lock.release()
+
+    def _run_step(self, step):
+        self._check_authorized()
+        if step["type"] != "wait":
+            self._execute_action(step)
+            return
+        end = time.monotonic() + step["value"] / 1000
+        while True:
+            self._check_authorized()
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                return
+            self._cancelled.wait(min(remaining, 0.05))
 
     def _press_key(self, combo: str):
         parts = combo.lower().split("+")
@@ -341,5 +426,6 @@ class ActionRunner:
             raise RuntimeError(f"Script launch failed: {e}") from e
     
     def shutdown(self):
-        self._executor.shutdown(wait=True, cancel_futures=False)
+        self.cancel()
+        self._executor.shutdown(wait=True, cancel_futures=True)
 

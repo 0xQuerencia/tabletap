@@ -1,0 +1,181 @@
+[
+  {
+    "id": "media.play_pause",
+    "label": "Play / pause",
+    "argv": [
+      "playerctl",
+      "play-pause"
+    ]
+  },
+  {
+    "id": "media.next",
+    "label": "Next track",
+    "argv": [
+      "playerctl",
+      "next"
+    ]
+  },
+  {
+    "id": "media.previous",
+    "label": "Previous track",
+    "argv": [
+      "playerctl",
+      "previous"
+    ]
+  },
+  {
+    "id": "audio.mute_toggle",
+    "label": "Toggle speakers mute",
+    "argv": [
+      "pactl",
+      "set-sink-mute",
+      "@DEFAULT_SINK@",
+      "toggle"
+    ]
+  },
+  {
+    "id": "audio.mic_toggle",
+    "label": "Toggle microphone mute",
+    "argv": [
+      "pactl",
+      "set-source-mute",
+      "@DEFAULT_SOURCE@",
+      "toggle"
+    ]
+  },
+  {
+    "id": "audio.volume_up",
+    "label": "Volume up 5%",
+    "argv": [
+      "pactl",
+      "set-sink-volume",
+      "@DEFAULT_SINK@",
+      "+5%"
+    ]
+  },
+  {
+    "id": "audio.volume_down",
+    "label": "Volume down 5%",
+    "argv": [
+      "pactl",
+      "set-sink-volume",
+      "@DEFAULT_SINK@",
+      "-5%"
+    ]
+  },
+  {
+    "id": "display.brightness_up",
+    "label": "Brightness up",
+    "argv": [
+      "brightnessctl",
+      "set",
+      "+5%"
+    ]
+  },
+  {
+    "id": "display.brightness_down",
+    "label": "Brightness down",
+    "argv": [
+      "brightnessctl",
+      "set",
+      "5%-"
+    ]
+  },
+  {
+    "id": "session.lock",
+    "label": "Lock screen",
+    "argv": [
+      "loginctl",
+      "lock-session"
+    ]
+  },
+  {
+    "id": "hyprland.fullscreen",
+    "label": "Toggle fullscreen",
+    "argv": [
+      "hyprctl",
+      "dispatch",
+      "fullscreen"
+    ]
+  },
+  {
+    "id": "hyprland.workspace_next",
+    "label": "Next workspace",
+    "argv": [
+      "hyprctl",
+      "dispatch",
+      "workspace",
+      "e+1"
+    ]
+  },
+  {
+    "id": "hyprland.workspace_previous",
+    "label": "Previous workspace",
+    "argv": [
+      "hyprctl",
+      "dispatch",
+      "workspace",
+      "e-1"
+    ]
+  },
+  {
+    "id": "gnome.apps",
+    "label": "GNOME · application overview",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+a"
+  },
+  {
+    "id": "gnome.workspace_next",
+    "label": "GNOME · next workspace",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+pagedown"
+  },
+  {
+    "id": "gnome.workspace_previous",
+    "label": "GNOME · previous workspace",
+    "adapter": "key",
+    "desktop": "gnome",
+    "shortcut": "super+pageup"
+  },
+  {
+    "id": "kde.show_desktop",
+    "label": "KDE · show desktop",
+    "desktop": "kde",
+    "argv": [
+      "busctl",
+      "--user",
+      "call",
+      "org.kde.kglobalaccel",
+      "/component/kwin",
+      "org.kde.kglobalaccel.Component",
+      "invokeShortcut",
+      "s",
+      "Show Desktop"
+    ]
+  },
+  {
+    "id": "kde.krunner",
+    "label": "KDE · open KRunner",
+    "desktop": "kde",
+    "argv": [
+      "krunner"
+    ]
+  },
+  {
+    "id": "files.home",
+    "label": "Open home folder",
+    "argv": [
+      "xdg-open",
+      "~"
+    ]
+  },
+  {
+    "id": "notify",
+    "label": "Show notification",
+    "adapter": "notify",
+    "parameter": "name",
+    "example": "TableTap"
+  }
+]

@@ -7,7 +7,6 @@ import pytest
 from tabletap.bridge import run_bridge, run_calibration
 from tabletap.calibrate import calibrate
 from tabletap.config import load_config
-from tabletap.daemon import Daemon
 from tabletap.mic import MicDisconnected
 from tabletap.service import install_user_service, render_user_service
 
@@ -39,6 +38,7 @@ def test_calibration_disconnect_is_machine_readable(capsys):
     cfg = {"audio": {}, "filter": {}}
     with patch("tabletap.bridge.load_config", return_value=cfg), \
          patch("tabletap.bridge.PIDLock") as lock, \
+         patch("tabletap.bridge.device_identity", return_value="fake-device"), \
          patch("tabletap.calibrate.calibrate", side_effect=MicDisconnected("USB mic removed")):
         lock.return_value.acquire.return_value = True
         result = run_calibration(config_path="/synthetic")
@@ -55,26 +55,14 @@ def test_calibration_rejects_zero_and_negative_duration():
             calibrate({}, duration_sec=duration)
 
 
-def test_daemon_sensitivity_uses_same_offset_and_hold_defaults_as_bridge():
-    cfg = {
-        "filter": {"sensitivity_offset_db": 12.0},
-        "detection": {"min_gap_ms": 180, "rhythm_window_ms": 850},
-        "actions": {},
-    }
-    daemon = Daemon(cfg)
-    try:
-        assert daemon.sensitivity_offset == 12.0
-        assert daemon.pattern_detector.enable_hold is False
-        assert daemon.impact.min_gap == pytest.approx(.18)
-    finally:
-        daemon.action_runner.shutdown()
-
 
 def test_user_service_uses_invoking_python_and_no_fake_display(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     venv_python = "/home/wizrizz/tabletap/.venv/bin/python"
     content = render_user_service(venv_python)
     assert f'ExecStart="{venv_python}" -m tabletap start' in content
+    assert " start --preview" in content
+    assert " start --preview" not in render_user_service(venv_python, live=True)
     assert "DISPLAY=:0" not in content
     assert "WAYLAND_DISPLAY=wayland-0" not in content
     unit = install_user_service(venv_python)
@@ -86,3 +74,25 @@ def test_user_service_uses_invoking_python_and_no_fake_display(tmp_path, monkeyp
 def test_service_refuses_relative_interpreter():
     with pytest.raises(ValueError, match="absolute"):
         render_user_service("python")
+
+
+def test_cached_ui_includes_native_catalog(tmp_path, monkeypatch):
+    import json
+    from tabletap.__main__ import _prepare_ui
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache = _prepare_ui()
+    actions = json.loads((cache / "native-actions.json").read_text())
+    assert any(item["id"] == "audio.mic_toggle" for item in actions)
+
+
+def test_cli_init_and_preview_dispatch(tmp_path, monkeypatch):
+    import sys
+    from tabletap.__main__ import main, preview_cmd
+    target = tmp_path / "new.yaml"
+    monkeypatch.setattr(sys, "argv", ["tabletap","init","--path",str(target)])
+    main()
+    assert target.exists()
+    with patch("tabletap.bridge.run_bridge", return_value=0) as bridge:
+        assert preview_cmd(str(target), 5) == 0
+    assert bridge.call_args.kwargs["dry_run"] is True
+    assert bridge.call_args.kwargs["duration"] == 5
