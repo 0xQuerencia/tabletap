@@ -71,3 +71,10 @@ test("parameterized integrations validate entity IDs and explicit shortcuts", ()
   expect(validateActionDraft({...a,value:"discord.mute:ctrl+shift+m"})).toBeNull()
   expect(validateActionDraft({...a,value:"obs.scene"})).toMatch(/parameter/)
 })
+
+test("library searches across categories and named launchers",async()=>{
+  const {searchPresets}=await import("./action-builder.ts")
+  expect(searchPresets("media play").some(p=>p.value==="media.play_pause")).toBe(true)
+  expect(searchPresets("launcher study",["default","study"])[0]?.value).toBe("study")
+  expect(searchPresets("zzzzzzzz")).toEqual([])
+})

@@ -6,13 +6,13 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import {
   actionFieldPath, getActionRows, getProfiles, readTableConfig, updateConfigField, updateConfigAction,
-  type Action, type TableConfig,
+  createActionProfile, clearAction, deleteActionProfile, type Action, type TableConfig,
 } from "./config-store.ts"
 import { SAFE_ARM, requestArm, confirmArm, expireArm, type ArmState } from "./safety.ts"
 import { PALETTES, PALETTE_NAMES, isPaletteName, nextPalette, type Palette, type PaletteName } from "./themes.ts"
 import { suggestCommands, isKnownCommand } from "./commands.ts"
 import {
-  ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, type ActionDraft,
+  ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, searchPresets, type ActionDraft,
   STEP_TYPES, editableWorkflow, defaultStep, moveStep, stepLabel, validateWorkflow, type WorkflowStep,
 } from "./action-builder.ts"
 
@@ -120,6 +120,12 @@ function App() {
   const [editing, setEditing] = createSignal(false)
   const [editText, setEditText] = createSignal("")
   const [builderOpen, setBuilderOpen] = createSignal(false)
+  const [builderTarget,setBuilderTarget] = createSignal<{profile:string;key:string}>({profile:"default",key:"single"})
+  const [libraryOpen,setLibraryOpen] = createSignal(false)
+  const [libraryQuery,setLibraryQuery] = createSignal("")
+  const [libraryIndex,setLibraryIndex] = createSignal(0)
+  const libraryMatches = createMemo(()=>searchPresets(libraryQuery(),getProfiles(config())))
+  const libraryStart = createMemo(()=>Math.max(0,libraryIndex()-4))
   const [builderDraft, setBuilderDraft] = createSignal<ActionDraft>({ name: "", type: "exec", value: "" })
   const [builderField, setBuilderField] = createSignal(0)
   const [builderPreset, setBuilderPreset] = createSignal(-1)
@@ -139,6 +145,7 @@ function App() {
   const [micDevices, setMicDevices] = createSignal<MicDevice[]>([])
   const [calPhase, setCalPhase] = createSignal("ready")
   const [calProgress, setCalProgress] = createSignal(0)
+  let libraryInput: InputRenderable | null = null
   let editInput: InputRenderable | null = null
   let commandInput: InputRenderable | null = null
   let bridge: ReturnType<typeof Bun.spawn> | null = null
@@ -534,13 +541,18 @@ function App() {
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
   }
-  async function openBuilder() {
+  async function openBuilder(extra = false) {
     if (IS_DEMO) {
       setNotice("Demo is read-only. Run tabletap without --demo to build actions.")
       return
     }
     if (!canEditRemote() || !await ensureBackgroundSafe()) return
-    const row = rows()[selected()]
+    const row = extra ? (()=>{
+      if (profile()==="default") return undefined
+      const keys=new Set(rows().map(([k])=>k))
+      const key=Array.from({length:16},(_,i)=>String(i+5)).find(k=>!keys.has(k))
+      return key ? [key,{}] as [string,Action] : undefined
+    })() : rows()[selected()]
     if (!row) {
       setPage(1)
       setNotice("No action mapping selected. Configure a profile first.")
@@ -549,12 +561,42 @@ function App() {
     // Editing cannot leave a live action-capable listener armed.
     disarm("Action Builder opened · live commands disabled")
     setPage(1)
+    setBuilderTarget({profile:profile(),key:row[0]})
     setBuilderDraft(normalizeActionDraft(row[1], row[0]))
+    if (!row[1].value) openLibrary()
     setBuilderField(0)
     setWorkflowOpen(false)
     setBuilderPreset(-1)
     setBuilderError("")
     setBuilderOpen(true)
+  }
+  function openLibrary() {
+    setLibraryQuery("")
+    setLibraryIndex(0)
+    setLibraryOpen(true)
+    queueMicrotask(()=>libraryInput?.focus())
+  }
+  async function editProfiles(operation:string,name:string) {
+    if (!canEditRemote() || !await ensureBackgroundSafe()) return
+    try {
+      disarm("Profile edited · live actions disabled",false)
+      const next = operation==="delete" ? deleteActionProfile(CONFIG,name,IS_DEMO) : createActionProfile(CONFIG,name,operation==="clone"?profile():undefined,IS_DEMO)
+      setConfig(next)
+      setProfile(operation==="delete" ? (profile()===name?"default":profile()) : name)
+      saveProfile(profile()); setSelected(0); setPage(1)
+      setNotice("Profile "+operation+" complete · config backed up")
+      if (isListening() || attached()) void startBridge()
+    } catch(error) { setNotice(String(error)); if(isListening() || attached()) void startBridge() }
+  }
+  async function removeMapping() {
+    const row=rows()[selected()]; if(!row?.[1].value) return
+    if(!canEditRemote() || !await ensureBackgroundSafe()) return
+    try {
+      disarm("Mapping cleared · live actions disabled",false)
+      setConfig(clearAction(CONFIG,profile(),row[0],IS_DEMO));setSelected(0)
+      setNotice("Mapping cleared · previous config backed up")
+      if(isListening() || attached()) void startBridge()
+    } catch(error){setNotice(String(error));if(isListening() || attached()) void startBridge()}
   }
   function cycleBuilder(step: number) {
     if (builderField() === 0) {
@@ -635,12 +677,13 @@ function App() {
   }
   async function saveBuilder() {
     if (!canEditRemote() || !await ensureBackgroundSafe()) return
-    const row = rows()[selected()]
-    if (!row) { setBuilderError("Selected action no longer exists"); return }
+    const target=builderTarget()
+    const row=[target.key] as const
+    if (!getProfiles(config()).includes(target.profile)) { setBuilderError("Selected profile no longer exists"); return }
     const issue = validateActionDraft(builderDraft()) || (builderDraft().type === "launcher" && !getProfiles(config()).filter(p => p !== "default").includes(builderDraft().value.trim()) ? "Choose an existing named profile" : null)
     if (issue) { setBuilderError(issue); return }
     try {
-      const updated = updateConfigAction(CONFIG, profile(), row[0], builderDraft(), IS_DEMO)
+      const updated = updateConfigAction(CONFIG, target.profile, row[0], builderDraft(), IS_DEMO)
       disarm("Action updated · live commands disabled", false)
       setConfig(updated)
       setBuilderOpen(false)
@@ -823,7 +866,8 @@ function App() {
     else if (cmd === "panic") void panicStop()
     else if (cmd === "profile") {
       const options = getProfiles(config())
-      if (arg && options.includes(arg)) {
+      if (arg && extra && ["new","clone","delete"].includes(arg)) void editProfiles(arg,extra)
+      else if (arg && options.includes(arg)) {
         void (async () => {
           if (!canEditRemote() || !await ensureBackgroundSafe()) return
           disarm("Profile switched · live actions disabled", false)
@@ -909,6 +953,17 @@ function App() {
       shutdown()
       return
     }
+    if (libraryOpen()) {
+      if(key.name==="escape"){setLibraryOpen(false);key.preventDefault()}
+      else if(key.name==="up"){setLibraryIndex(i=>Math.max(0,i-1));key.preventDefault()}
+      else if(key.name==="down"){setLibraryIndex(i=>Math.max(0,Math.min(libraryMatches().length-1,i+1)));key.preventDefault()}
+      else if(key.name==="enter"||key.name==="return"){
+        const item=libraryMatches()[libraryIndex()]
+        if(item){setBuilderDraft({name:item.name,type:item.type,value:item.value});setBuilderPreset(-1);setLibraryOpen(false);setBuilderError("")}
+        key.preventDefault()
+      }
+      return
+    }
     if (workflowOpen()) {
       key.preventDefault()
       const steps = workflowSteps()
@@ -957,6 +1012,7 @@ function App() {
         setNotice("Action edit cancelled · original mapping kept")
       } else if ((key.ctrl && key.name === "s") || key.name === "s") {
         saveBuilder()
+      } else if(key.name==="l"){openLibrary()
       } else if (key.name === "tab" || key.name === "j" || key.name === "down") {
         setBuilderField((v) => (v + (key.shift ? 3 : 1)) % 4)
       } else if (key.name === "k" || key.name === "up") {
@@ -966,7 +1022,8 @@ function App() {
       } else if (key.name === "right") {
         cycleBuilder(1)
       } else if (key.name === "enter" || key.name === "return") {
-        if (builderField() <= 1) cycleBuilder(1)
+        if (builderField() === 1) openLibrary()
+        else if (builderField() === 0) cycleBuilder(1)
         else if (builderField() === 3 && builderDraft().type === "workflow") openWorkflow()
         else startBuilderInput(builderField() === 2 ? "name" : "value")
       }
@@ -995,6 +1052,8 @@ function App() {
       if (key.name === "down" || key.name === "j") setSelected((v) => Math.min(rows().length - 1, v + 1))
       if (key.name === "return" || key.name === "enter" || key.name === "e" || key.name === "b") openBuilder()
       if (key.name === "t") changeActionType()
+      if (key.name === "a") void openBuilder(true)
+      if (key.name === "d") void removeMapping()
     } else if (page() === 4) {
       if (key.name === "t") labelCandidate("tap")
       if (key.name === "n") labelCandidate("noise")
@@ -1110,16 +1169,17 @@ function App() {
       <Show when={page() === 1}>
         <box flexGrow={1} paddingX={2} paddingTop={2} gap={1}>
           <text fg={theme.accent} attributes={TextAttributes.BOLD}>ACTIONS</text>
+          <text fg={theme.dim}>B edit · A add menu slot · D clear · /profile new|clone|delete NAME</text>
           <Show when={!builderOpen()}>
             <text fg={theme.dim}>Profile: {profile()} · P switch · J/K select · Enter/B build · T quick-cycle action type</text>
             <box border={["bottom"]} borderColor={theme.border} paddingBottom={1}>
-              <text fg={theme.dim}>GESTURE             TYPE        COMMAND</text>
+              <text fg={theme.dim}>GESTURE             TYPE        ACTION</text>
             </box>
             <For each={rows()}>{([pattern, action], i) =>
               <box backgroundColor={selected() === i() ? theme.active : "transparent"} paddingLeft={1} paddingY={0}>
                 <text fg={selected() === i() ? theme.accent : theme.text}>
                   {selected() === i() ? "› " : "  "}
-                  {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.value || "", Math.max(8, dimensions().width - 44))}
+                  {(profile() === "default" ? pattern : ["", "single", "double", "triple", "quadruple"][Number(pattern)] || pattern).padEnd(18)}{String(action?.type || "exec").padEnd(12)}{truncate(action?.name || action?.value || "Not mapped", Math.max(8, dimensions().width - 44))}
                 </text>
               </box>
             }</For>
@@ -1143,15 +1203,23 @@ function App() {
               <text fg={theme.good}>Changes are only a draft until saved in Action Builder.</text>
             </box>
           </Show>
-          <Show when={builderOpen() && !workflowOpen()}>
+          <Show when={builderOpen() && libraryOpen()}>
+            <box backgroundColor={theme.pane} padding={1} gap={1}>
+              <text fg={theme.accent} attributes={TextAttributes.BOLD}>ACTION LIBRARY · {libraryMatches().length} matches</text>
+              <input ref={(input)=>{libraryInput=input}} focused value={libraryQuery()} onInput={v=>{setLibraryQuery(v);setLibraryIndex(0)}} placeholder="Search media, OBS, shortcuts, apps…" textColor={theme.text} />
+              <For each={libraryMatches().slice(libraryStart(),libraryStart()+6)}>{(item,i)=><text fg={libraryIndex()===libraryStart()+i()?theme.accent:theme.text}>{libraryIndex()===libraryStart()+i()?"› ":"  "}{truncate(item.label+" · "+item.type,Math.max(12,dimensions().width-12))}</text>}</For>
+              <text fg={theme.dim}>↑/↓ choose · Enter use draft · Esc back · no commands run</text>
+            </box>
+          </Show>
+          <Show when={builderOpen() && !workflowOpen() && !libraryOpen()}>
             <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={2} gap={1}>
               <text fg={theme.accent} attributes={TextAttributes.BOLD}>INTERACTIVE ACTION BUILDER</text>
-              <text fg={theme.dim}>{profile()} / {rows()[selected()]?.[0] || "unknown"} · J/K/Tab fields · ←/→ choices · Enter select/edit</text>
+              <text fg={theme.dim}>{builderTarget().profile} / {builderTarget().key} · J/K/Tab fields · ←/→ choices · Enter select/edit</text>
               <text fg={builderField() === 0 ? theme.accent : theme.text}>
                 {builderField() === 0 ? "› " : "  "}Type      {builderDraft().type.toUpperCase()}  {builderField() === 0 ? "← / →" : ""}
               </text>
               <text fg={builderField() === 1 ? theme.accent : theme.text}>
-                {builderField() === 1 ? "› " : "  "}Preset    {builderPreset() < 0 ? "Custom (← / → to choose example)" :
+                {builderField() === 1 ? "› " : "  "}Preset    {builderPreset() < 0 ? "Custom (Enter / L to search library)" :
                   presetsFor(builderDraft().type, getProfiles(config()))[builderPreset()]?.label || "Custom"}
               </text>
               <text fg={builderField() === 2 ? theme.accent : theme.text}>

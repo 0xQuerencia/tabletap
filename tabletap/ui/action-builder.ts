@@ -143,3 +143,9 @@ export function stepLabel(step: WorkflowStep): string {
   if (step.type === "builtin") return NATIVE_ACTIONS.find(item => item.id === String(step.value).split(":")[0])?.label || String(step.value)
   return step.type + " · " + step.value
 }
+
+export function searchPresets(query: string, profiles: readonly string[] = []): ActionPreset[] {
+  const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  return ACTION_TYPES.flatMap(type => presetsFor(type,profiles)).filter(preset =>
+    words.every(word => [preset.label,preset.name,preset.type,preset.value].join(" ").toLowerCase().includes(word)))
+}
