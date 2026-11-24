@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft } from "./action-builder.ts"
+import { ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, editableWorkflow, defaultStep, moveStep, stepLabel } from "./action-builder.ts"
 
 test("builder always supplies supported types and deliberate, nonexecuting presets", () => {
   expect(ACTION_TYPES).toEqual(["exec", "key", "script", "builtin", "workflow"])
@@ -37,4 +37,15 @@ test("workflow validates all steps before saving", () => {
   expect(validateActionDraft({...draft,value:JSON.stringify([{type:"wait",value:50},{type:"builtin",value:"media.next"}])})).toBeNull()
   expect(validateActionDraft({...draft,value:JSON.stringify([{type:"exec",value:"foo"},{type:"workflow",value:"[]"}])})).toMatch(/Unsupported/)
   expect(validateActionDraft({...draft,value:JSON.stringify([{type:"wait",value:10001}])})).toMatch(/Wait/)
+})
+
+test("visual workflow editing preserves order and does not mutate the original", () => {
+  const steps = [defaultStep("builtin"), defaultStep("wait"), defaultStep("exec")]
+  expect(stepLabel(steps[1]!)).toBe("Wait 500 ms")
+  expect(moveStep(steps, 2, -1)).toEqual([steps[0], steps[2], steps[1]])
+  expect(steps[1]?.type).toBe("wait")
+  expect(moveStep(steps, 0, -1)).toEqual(steps)
+  expect(editableWorkflow(JSON.stringify(steps))).toEqual(steps)
+  expect(editableWorkflow("[]")).toEqual([])
+  expect(() => editableWorkflow("invalid")).toThrow()
 })

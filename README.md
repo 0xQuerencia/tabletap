@@ -471,7 +471,7 @@ The default three-tap map and hardware detection remain unchanged.
 
 ### Sequential workflows (initial engine)
 
-Choose **workflow** in the Action Builder and edit its JSON step array. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait. The visual step-by-step editor and parallel/conditional execution are not yet included.
+Choose **workflow** in the Action Builder, select Steps and press Enter. Add with A, delete with D, select with J/K, reorder with Ctrl+arrow, change type with left/right, choose a preset with P and edit the selected step with Enter. S applies the draft, then S in Action Builder saves atomically. Each step is an existing key, exec, script or builtin action, or a wait in milliseconds. The entire sequence is validated before the first step runs. A failed step stops the rest; a second concurrent workflow is refused. Stopping/disarming the listener or expiration cancels further steps, including waits. Commands already spawned are not undone; exec/script steps launch rather than wait for child exit. Other gestures may still execute independently. Maximum 20 steps, 10 seconds per wait, and 30 seconds total wait. Parallel and conditional execution are not yet included.
 
 ```yaml
 actions:

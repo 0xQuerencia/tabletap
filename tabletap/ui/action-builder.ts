@@ -69,3 +69,34 @@ export function validateWorkflow(value: string): string | null {
   }
   return wait > 30000 ? "Total workflow wait must not exceed 30 seconds" : null
 }
+
+export const STEP_TYPES = ["builtin", "exec", "key", "script", "wait"] as const
+export type StepType = typeof STEP_TYPES[number]
+export type WorkflowStep = { type: StepType; value: string | number }
+
+export function defaultStep(type: StepType): WorkflowStep {
+  if (type === "wait") return {type, value: 500}
+  return {type, value: presetsFor(type)[0]?.value || ""}
+}
+
+export function editableWorkflow(value: string): WorkflowStep[] {
+  if (!value.trim() || value.trim() === "[]") return []
+  const issue = validateWorkflow(value)
+  if (issue) throw new Error(issue)
+  return JSON.parse(value) as WorkflowStep[]
+}
+
+export function moveStep(steps: WorkflowStep[], index: number, offset: number): WorkflowStep[] {
+  const target = index + offset
+  if (index < 0 || index >= steps.length || target < 0 || target >= steps.length) return steps
+  const next = steps.slice()
+  const step = next.splice(index, 1)[0]!
+  next.splice(target, 0, step)
+  return next
+}
+
+export function stepLabel(step: WorkflowStep): string {
+  if (step.type === "wait") return `Wait ${step.value} ms`
+  if (step.type === "builtin") return NATIVE_ACTIONS.find(item => item.id === step.value)?.label || String(step.value)
+  return step.type + " · " + step.value
+}

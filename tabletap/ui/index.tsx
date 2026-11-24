@@ -13,6 +13,7 @@ import { PALETTES, PALETTE_NAMES, isPaletteName, nextPalette, type Palette, type
 import { suggestCommands, isKnownCommand } from "./commands.ts"
 import {
   ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, type ActionDraft,
+  STEP_TYPES, editableWorkflow, defaultStep, moveStep, stepLabel, validateWorkflow, type WorkflowStep,
 } from "./action-builder.ts"
 
 type MicDevice = {
@@ -116,6 +117,11 @@ function App() {
   const [builderPreset, setBuilderPreset] = createSignal(-1)
   const [builderInputField, setBuilderInputField] = createSignal<"name" | "value">("value")
   const [builderError, setBuilderError] = createSignal("")
+  const [workflowOpen, setWorkflowOpen] = createSignal(false)
+  const [workflowSteps, setWorkflowSteps] = createSignal<WorkflowStep[]>([])
+  const [workflowIndex, setWorkflowIndex] = createSignal(0)
+  const workflowStart = createMemo(() => Math.max(0, Math.min(workflowIndex() - 2, workflowSteps().length - 5)))
+  const workflowRows = createMemo(() => workflowSteps().slice(workflowStart(), workflowStart() + 5))
   const [commandOpen, setCommandOpen] = createSignal(false)
   const [commandText, setCommandText] = createSignal("")
   const [commandSelection, setCommandSelection] = createSignal(0)
@@ -430,6 +436,7 @@ function App() {
     setPage(1)
     setBuilderDraft(normalizeActionDraft(row[1], row[0]))
     setBuilderField(0)
+    setWorkflowOpen(false)
     setBuilderPreset(-1)
     setBuilderError("")
     setBuilderOpen(true)
@@ -439,7 +446,7 @@ function App() {
       const draft = builderDraft()
       const current = ACTION_TYPES.indexOf(draft.type)
       const next = ACTION_TYPES[(current + step + ACTION_TYPES.length) % ACTION_TYPES.length] || "exec"
-      setBuilderDraft({ ...draft, type: next })
+      setBuilderDraft({ ...draft, type: next, value: next === "workflow" ? "[]" : draft.type === "workflow" ? "" : draft.value })
       setBuilderPreset(-1)
     } else if (builderField() === 1) {
       const examples = presetsFor(builderDraft().type)
@@ -452,6 +459,37 @@ function App() {
     }
     setBuilderError("")
   }
+  function openWorkflow() {
+    try {
+      setWorkflowSteps(editableWorkflow(builderDraft().value))
+      setWorkflowIndex(0)
+      setWorkflowOpen(true)
+      setBuilderError("")
+    } catch (error) {
+      setBuilderError(String(error) + " · edit raw value to repair")
+      startBuilderInput("value")
+    }
+  }
+  function replaceWorkflowStep(step: WorkflowStep) {
+    setWorkflowSteps(steps => steps.map((old, index) => index === workflowIndex() ? step : old))
+    setBuilderError("")
+  }
+  function editWorkflowStep() {
+    const step = workflowSteps()[workflowIndex()]
+    if (!step) return
+    setEditText(String(step.value))
+    setEditing(true)
+    queueMicrotask(() => editInput?.focus())
+  }
+  function applyWorkflow() {
+    const value = JSON.stringify(workflowSteps())
+    const problem = validateWorkflow(value)
+    if (problem) { setBuilderError(problem); return }
+    setBuilderDraft(draft => ({...draft, value}))
+    setBuilderPreset(-1)
+    setBuilderError("")
+    setWorkflowOpen(false)
+  }
   function startBuilderInput(field: "name" | "value") {
     setBuilderInputField(field)
     setEditText(builderDraft()[field])
@@ -459,6 +497,18 @@ function App() {
     queueMicrotask(() => editInput?.focus())
   }
   function applyBuilderInput() {
+    if (workflowOpen()) {
+      const step = workflowSteps()[workflowIndex()]
+      if (!step) return
+      const raw = editText().trim()
+      const value = step.type === "wait" && raw ? Number(raw) : raw
+      const problem = validateWorkflow(JSON.stringify([{type: step.type, value}]))
+      if (problem) { setBuilderError(problem); return }
+      replaceWorkflowStep({type:step.type, value})
+      editInput?.blur()
+      setEditing(false)
+      return
+    }
     setBuilderDraft((draft) => ({ ...draft, [builderInputField()]: editText() }))
     setBuilderPreset(-1)
     setBuilderError("")
@@ -706,6 +756,47 @@ function App() {
       shutdown()
       return
     }
+    if (workflowOpen()) {
+      key.preventDefault()
+      const steps = workflowSteps()
+      const index = workflowIndex()
+      const step = steps[index]
+      if (key.name === "escape") {
+        setWorkflowOpen(false)
+        setBuilderError("")
+      } else if (key.name === "s") {
+        applyWorkflow()
+      } else if (key.name === "a" && steps.length < 20) {
+        setWorkflowSteps([...steps, defaultStep("builtin")])
+        setWorkflowIndex(steps.length)
+      } else if (key.name === "d" && step) {
+        setWorkflowSteps(steps.filter((_, i) => i !== index))
+        setWorkflowIndex(Math.max(0, Math.min(index, steps.length - 2)))
+      } else if ((key.name === "up" || key.name === "down") && key.ctrl && step) {
+        const offset = key.name === "up" ? -1 : 1
+        const moved = moveStep(steps, index, offset)
+        if (moved !== steps) {
+          setWorkflowSteps(moved)
+          setWorkflowIndex(index + offset)
+        }
+      } else if (key.name === "up" || key.name === "k") {
+        setWorkflowIndex(Math.max(0, index - 1))
+      } else if (key.name === "down" || key.name === "j") {
+        setWorkflowIndex(Math.max(0, Math.min(steps.length - 1, index + 1)))
+      } else if ((key.name === "left" || key.name === "right") && step) {
+        const offset = key.name === "left" ? -1 : 1
+        const kind = STEP_TYPES[(STEP_TYPES.indexOf(step.type) + offset + STEP_TYPES.length) % STEP_TYPES.length]!
+        replaceWorkflowStep(defaultStep(kind))
+      } else if (key.name === "p" && step && step.type !== "wait") {
+        const presets = presetsFor(step.type)
+        const at = presets.findIndex(preset => preset.value === step.value)
+        const next = presets[(at + 1) % presets.length]
+        if (next) replaceWorkflowStep({type:step.type, value:next.value})
+      } else if ((key.name === "enter" || key.name === "return") && step) {
+        editWorkflowStep()
+      }
+      return
+    }
     if (builderOpen()) {
       key.preventDefault()
       if (key.name === "escape") {
@@ -723,6 +814,7 @@ function App() {
         cycleBuilder(1)
       } else if (key.name === "enter" || key.name === "return") {
         if (builderField() <= 1) cycleBuilder(1)
+        else if (builderField() === 3 && builderDraft().type === "workflow") openWorkflow()
         else startBuilderInput(builderField() === 2 ? "name" : "value")
       }
       return
@@ -874,7 +966,26 @@ function App() {
               </box>
             }</For>
           </Show>
-          <Show when={builderOpen()}>
+          <Show when={builderOpen() && workflowOpen()}>
+            <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={1} gap={1}>
+              <text fg={theme.accent} attributes={TextAttributes.BOLD}>WORKFLOW STEPS · {workflowSteps().length}/20</text>
+              <text fg={theme.dim}>A add · D delete · J/K select · Ctrl+↑/↓ reorder</text>
+              <text fg={theme.dim}>←/→ type · P preset · Enter edit · S apply · Esc discard</text>
+              <Show when={!workflowSteps().length}><text fg={theme.dim}>No steps yet. Press A to add one.</text></Show>
+              <For each={workflowRows()}>{(step, i) =>
+                <text fg={workflowIndex() === i() + workflowStart() ? theme.accent : theme.text}>
+                  {workflowIndex() === i() + workflowStart() ? "› " : "  "}{i() + workflowStart() + 1}. {truncate(stepLabel(step), Math.max(8, dimensions().width - 12))}
+                </text>
+              }</For>
+              <Show when={editing()}>
+                <input ref={(input) => { editInput = input }} focused value={editText()} onInput={setEditText}
+                  textColor={theme.text} focusedTextColor={theme.text} backgroundColor={theme.pane} />
+              </Show>
+              <Show when={builderError()}><text fg={theme.amber}>{builderError()}</text></Show>
+              <text fg={theme.good}>Changes are only a draft until saved in Action Builder.</text>
+            </box>
+          </Show>
+          <Show when={builderOpen() && !workflowOpen()}>
             <box backgroundColor={theme.pane} border={["left"]} borderColor={theme.accent} padding={2} gap={1}>
               <text fg={theme.accent} attributes={TextAttributes.BOLD}>INTERACTIVE ACTION BUILDER</text>
               <text fg={theme.dim}>{profile()} / {rows()[selected()]?.[0] || "unknown"} · J/K/Tab fields · ←/→ choices · Enter select/edit</text>
@@ -889,7 +1000,7 @@ function App() {
                 {builderField() === 2 ? "› " : "  "}Name      {truncate(builderDraft().name, Math.max(12, dimensions().width - 24))}
               </text>
               <text fg={builderField() === 3 ? theme.accent : theme.text}>
-                {builderField() === 3 ? "› " : "  "}Command   {truncate(builderDraft().value, Math.max(12, dimensions().width - 24))}
+                {builderField() === 3 ? "› " : "  "}{builderDraft().type === "workflow" ? "Steps     Enter to edit sequence" : "Command   " + truncate(builderDraft().value, Math.max(12, dimensions().width - 24))}
               </text>
               <Show when={editing()}>
                 <box border={["top"]} borderColor={theme.border} paddingTop={1}>
