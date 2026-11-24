@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 const NATIVE_ACTIONS: { id: string; label: string; argv: string[] }[] = JSON.parse(
   readFileSync(new URL("./native-actions.json", import.meta.url), "utf8"),
 )
-export const ACTION_TYPES = ["exec", "key", "script", "builtin", "workflow"] as const
+export const ACTION_TYPES = ["exec", "key", "script", "builtin", "workflow", "launcher"] as const
 export type ActionType = typeof ACTION_TYPES[number]
 export type ActionDraft = { name: string; type: ActionType; value: string }
 export type ActionPreset = ActionDraft & { label: string }
@@ -21,7 +21,10 @@ export const ACTION_PRESETS: readonly ActionPreset[] = [
   { label: "My script (example)", name: "My script", type: "script", value: "~/.local/bin/my-script.sh" },
 ] as const
 
-export function presetsFor(type: ActionType): readonly ActionPreset[] {
+export function presetsFor(type: ActionType, profiles: readonly string[] = []): readonly ActionPreset[] {
+  if (type === "launcher") return profiles.filter(p => p !== "default").map(profile => ({
+    type: "launcher", label: profile, name: "Open " + profile, value: profile,
+  }))
   return ACTION_PRESETS.filter((item) => item.type === type)
 }
 
@@ -43,6 +46,7 @@ export function validateActionDraft(draft: ActionDraft): string | null {
   const value = draft.value.trim()
   if (!value) return "Enter a command or shortcut before saving"
   if (draft.type === "workflow") return validateWorkflow(value)
+  if (draft.type === "launcher" && (value === "default" || value.length > 100 || /[\r\n\x00-\x1f]/.test(value))) return "Choose a named action profile"
   if (value.length > 1024 || /[\r\n\x00]/.test(value)) return "Command must be a single line under 1024 characters"
   if (draft.type === "builtin" && !NATIVE_ACTIONS.some((item) => item.id === value)) return "Choose a known built-in action"
   if (draft.type === "key" && !/^[a-z0-9_]+(\+[a-z0-9_]+)*$/i.test(value)) {

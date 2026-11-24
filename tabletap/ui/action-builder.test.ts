@@ -2,10 +2,10 @@ import { test, expect } from "bun:test"
 import { ACTION_TYPES, normalizeActionDraft, presetsFor, validateActionDraft, editableWorkflow, defaultStep, moveStep, stepLabel } from "./action-builder.ts"
 
 test("builder always supplies supported types and deliberate, nonexecuting presets", () => {
-  expect(ACTION_TYPES).toEqual(["exec", "key", "script", "builtin", "workflow"])
+  expect(ACTION_TYPES).toEqual(["exec", "key", "script", "builtin", "workflow", "launcher"])
   for (const type of ACTION_TYPES) {
-    expect(presetsFor(type).length).toBeGreaterThan(0)
-    for (const preset of presetsFor(type)) {
+    expect(presetsFor(type, ["default", "media"]).length).toBeGreaterThan(0)
+    for (const preset of presetsFor(type, ["default", "media"])) {
       expect(preset.type).toBe(type)
       expect(validateActionDraft(preset)).toBeNull()
     }
@@ -48,4 +48,11 @@ test("visual workflow editing preserves order and does not mutate the original",
   expect(editableWorkflow(JSON.stringify(steps))).toEqual(steps)
   expect(editableWorkflow("[]")).toEqual([])
   expect(() => editableWorkflow("invalid")).toThrow()
+})
+
+
+test("launcher presets use actual named profiles, never the default map", () => {
+  expect(presetsFor("launcher", ["default", "study", "media"]).map(p => p.value)).toEqual(["study", "media"])
+  expect(presetsFor("launcher")).toEqual([])
+  expect(validateActionDraft({name:"Menu", type:"launcher", value:"default"})).toMatch(/named action profile/)
 })

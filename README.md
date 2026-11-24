@@ -480,3 +480,7 @@ actions:
     type: workflow
     value: '[{"type":"exec","value":"code"},{"type":"wait","value":500},{"type":"exec","value":"foot"}]'
 ```
+
+### Gesture launcher
+
+Install one optional desktop menu utility: `fuzzel`, `wofi` or `rofi` on Wayland, or `rofi` / `dmenu` on X11. In the Action Builder select **launcher**, then select an existing named profile from its presets. A live authorized tap opens a searchable menu of the profile's numbered actions (up to 20). Use the keyboard or your menu utility's normal selection controls. Closing the menu does nothing; stopping/disarming the listener or authorization expiry cancels the menu. A menu can launch a workflow, but cannot recursively launch another menu. Safe preview never opens it. Menu appearance follows your installed launcher rather than adding another GUI framework.

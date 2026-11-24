@@ -28,7 +28,7 @@ type BridgeMessage =
   | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
   | { type: "level"; db: number; threshold_db: number; spike: boolean }
   | { type: "gesture"; pattern: string; action: string; dispatched: boolean }
-  | { type: "action_result"; pattern: string; status: "launched" | "failed"; message: string }
+  | { type: "action_result"; pattern: string; status: "launched" | "failed" | "dismissed"; message: string }
   | { type: "error"; message: string }
   | { type: "stopped" }
   | { type: "rejected"; reason: string }
@@ -278,7 +278,7 @@ function App() {
     } else if (m.type === "action_result") {
       const resultText = m.status === "failed"
         ? m.pattern.toUpperCase() + "  FAILED: " + m.message
-        : m.pattern.toUpperCase() + "  command launched"
+        : m.pattern.toUpperCase() + (m.status === "dismissed" ? "  menu dismissed" : "  command launched")
       addLog(resultText)
       setNotice(resultText)
     } else if (m.type === "live_expired") {
@@ -415,7 +415,7 @@ function App() {
     const row = rows()[selected()]
     if (!row) return
     const [key, action] = row
-    if (action.type === "builtin" || action.type === "workflow") { openBuilder(); return }
+    if (action.type === "builtin" || action.type === "workflow" || action.type === "launcher") { openBuilder(); return }
     const options: Action["type"][] = ["exec", "key", "script"]
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
@@ -449,7 +449,7 @@ function App() {
       setBuilderDraft({ ...draft, type: next, value: next === "workflow" ? "[]" : draft.type === "workflow" ? "" : draft.value })
       setBuilderPreset(-1)
     } else if (builderField() === 1) {
-      const examples = presetsFor(builderDraft().type)
+      const examples = presetsFor(builderDraft().type, getProfiles(config()))
       if (!examples.length) return
       const at = ((builderPreset() + step) % examples.length + examples.length) % examples.length
       const example = examples[at]
@@ -518,7 +518,7 @@ function App() {
   function saveBuilder() {
     const row = rows()[selected()]
     if (!row) { setBuilderError("Selected action no longer exists"); return }
-    const issue = validateActionDraft(builderDraft())
+    const issue = validateActionDraft(builderDraft()) || (builderDraft().type === "launcher" && !getProfiles(config()).filter(p => p !== "default").includes(builderDraft().value.trim()) ? "Choose an existing named profile" : null)
     if (issue) { setBuilderError(issue); return }
     try {
       const updated = updateConfigAction(CONFIG, profile(), row[0], builderDraft(), IS_DEMO)
@@ -994,13 +994,13 @@ function App() {
               </text>
               <text fg={builderField() === 1 ? theme.accent : theme.text}>
                 {builderField() === 1 ? "› " : "  "}Preset    {builderPreset() < 0 ? "Custom (← / → to choose example)" :
-                  presetsFor(builderDraft().type)[builderPreset()]?.label || "Custom"}
+                  presetsFor(builderDraft().type, getProfiles(config()))[builderPreset()]?.label || "Custom"}
               </text>
               <text fg={builderField() === 2 ? theme.accent : theme.text}>
                 {builderField() === 2 ? "› " : "  "}Name      {truncate(builderDraft().name, Math.max(12, dimensions().width - 24))}
               </text>
               <text fg={builderField() === 3 ? theme.accent : theme.text}>
-                {builderField() === 3 ? "› " : "  "}{builderDraft().type === "workflow" ? "Steps     Enter to edit sequence" : "Command   " + truncate(builderDraft().value, Math.max(12, dimensions().width - 24))}
+                {builderField() === 3 ? "› " : "  "}{builderDraft().type === "workflow" ? "Steps     Enter to edit sequence" : (builderDraft().type === "launcher" ? "Profile   " : "Command   ") + truncate(builderDraft().value, Math.max(12, dimensions().width - 24))}
               </text>
               <Show when={editing()}>
                 <box border={["top"]} borderColor={theme.border} paddingTop={1}>

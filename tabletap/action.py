@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .native_actions import execute_native
 from .workflow import parse_workflow
+from .launcher import profile_menu, choose_action
 
 try:
     import pynput
@@ -67,6 +68,7 @@ class ActionRunner:
         self.display_server = _detect_display_server()
         self._cancelled = threading.Event()
         self._workflow_lock = threading.Lock()
+        self._launcher_lock = threading.Lock()
         self.deadline = None
         
         self._category_map = {}
@@ -78,7 +80,7 @@ class ActionRunner:
                         self._category_map[int(num)] = action
 
     def run(self, key: str):
-        if self._cancelled.is_set():
+        if self._cancelled.is_set() or self._launcher_lock.locked():
             return None
         action = self._get_action(key)
         if not isinstance(action, dict) or not str(action.get("value", "")).strip():
@@ -87,14 +89,14 @@ class ActionRunner:
         if self.on_result is not None:
             def report(completed):
                 try:
-                    completed.result()
+                    result = completed.result()
                 except Exception as exc:
                     log.error("Action %s failed: %s", key, exc)
                     self.on_result(key, "failed", str(exc))
                 else:
                     # Successful spawn/keypress, not proof that a child process
                     # subsequently exited with zero status.
-                    self.on_result(key, "launched", "")
+                    self.on_result(key, "dismissed" if result == "dismissed" else "launched", "")
             future.add_done_callback(report)
         return future
 
@@ -104,6 +106,8 @@ class ActionRunner:
             return self._execute_action(action)
     
     def run_category(self, category: str, number: int):
+        if self._cancelled.is_set() or self._launcher_lock.locked():
+            return
         action = self.get_action(category, number)
         if action is None:
             return
@@ -157,8 +161,23 @@ class ActionRunner:
             execute_native(value)
         elif action_type == "workflow":
             self._run_workflow(value)
+        elif action_type == "launcher":
+            return self._run_launcher(value)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
+
+    def _run_launcher(self, profile: str):
+        if not self._launcher_lock.acquire(blocking=False):
+            raise RuntimeError("An action launcher is already open")
+        try:
+            entries = profile_menu(self.actions, profile)
+            selected = choose_action(entries, self.display_server, self._check_authorized)
+            if selected is None:
+                return "dismissed"
+            self._check_authorized()
+            return self._execute_action(selected)
+        finally:
+            self._launcher_lock.release()
 
     def _check_authorized(self):
         if self._cancelled.is_set() or (self.deadline is not None and time.monotonic() >= self.deadline):
