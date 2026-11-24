@@ -409,6 +409,7 @@ function App() {
     const row = rows()[selected()]
     if (!row) return
     const [key, action] = row
+    if (action.type === "builtin" || action.type === "workflow") { openBuilder(); return }
     const options: Action["type"][] = ["exec", "key", "script"]
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)

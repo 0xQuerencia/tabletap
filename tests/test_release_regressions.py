@@ -86,3 +86,12 @@ def test_user_service_uses_invoking_python_and_no_fake_display(tmp_path, monkeyp
 def test_service_refuses_relative_interpreter():
     with pytest.raises(ValueError, match="absolute"):
         render_user_service("python")
+
+
+def test_cached_ui_includes_native_catalog(tmp_path, monkeypatch):
+    import json
+    from tabletap.__main__ import _prepare_ui
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache = _prepare_ui()
+    actions = json.loads((cache / "native-actions.json").read_text())
+    assert any(item["id"] == "audio.mic_toggle" for item in actions)
