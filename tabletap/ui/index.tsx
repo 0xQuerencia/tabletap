@@ -25,7 +25,8 @@ type MicDevice = {
 }
 
 type BridgeMessage =
-  | { type: "ready"; category: string; dry_run: boolean; threshold_db: number }
+  | { type: "ready"; category: string; dry_run: boolean; threshold_db: number; config_path?: string }
+  | { type: "transition"; message: string }
   | { type: "level"; db: number; threshold_db: number; spike: boolean }
   | { type: "gesture"; pattern: string; action: string; dispatched: boolean }
   | { type: "action_result"; pattern: string; status: "launched" | "failed" | "dismissed"; message: string }
@@ -103,7 +104,10 @@ function App() {
   const [profile, setProfile] = createSignal(loadProfile())
   const [state, setState] = createSignal(IS_DEMO ? "DEMO" : "STOPPED")
   const [armState, setArmState] = createSignal<ArmState>(SAFE_ARM)
-  const preview = createMemo(() => armState().mode !== "live")
+  const [attached, setAttached] = createSignal(false)
+  const [remoteLive, setRemoteLive] = createSignal(false)
+  const [remoteConfig, setRemoteConfig] = createSignal(CONFIG)
+  const preview = createMemo(() => attached() ? !remoteLive() : armState().mode !== "live")
   const [level, setLevel] = createSignal(-80)
   const [threshold, setThreshold] = createSignal(-30)
   const [wave, setWave] = createSignal(Array(45).fill(0) as number[])
@@ -215,6 +219,11 @@ function App() {
       setNotice("Start safe microphone preview with Space before arming")
       return
     }
+    if (attached() && remoteLive()) {
+      disarm("Background live actions disabled", false)
+      void backgroundCommand("safe").then(result => setNotice(result?.error || "Disarm requested"))
+      return
+    }
     const next = requestArm(armState(), Date.now())
     setSafety(next)
     setNotice(next.mode === "confirm"
@@ -234,15 +243,62 @@ function App() {
     addLog("Explicitly armed live actions for 10 minutes")
   }
   async function panicStop() {
-    disarm("PANIC STOP · microphone stopped, actions disarmed", false)
-    await stopBridge(true, true)
-    setNotice("PANIC STOP · microphone stopped, actions disarmed")
-    addLog("PANIC STOP invoked")
+    setSafety(SAFE_ARM, false)
+    if (await stopListening(true)) {
+      setNotice("PANIC STOP · listener stopped, actions disarmed")
+      addLog("PANIC STOP invoked")
+    }
+  }
+  async function backgroundCommand(operation: string, args: string[] = []) {
+    if (IS_DEMO) return null
+    try {
+      const proc = Bun.spawn([PYTHON, "-m", "tabletap", "control", operation, ...args], {
+        stdout: "pipe", stderr: "ignore", stdin: "ignore",
+      })
+      const content = await new Response(proc.stdout).text()
+      await proc.exited
+      return JSON.parse(content) as {error?:string; accepted?:boolean; state?:{type:string; dry_run?:boolean; category?:string; config_path?:string}}
+    } catch { return null }
+  }
+  async function ensureBackgroundSafe(): Promise<boolean> {
+    if (!attached()) return true
+    const result = await backgroundCommand("safe")
+    if (!result?.accepted) {
+      setNotice(result?.error || "Cannot disarm background listener")
+      return false
+    }
+    return true
+  }
+  function canEditRemote() {
+    if (attached() && remoteConfig() !== CONFIG) {
+      setNotice("Background listener uses a different config; edit that file or stop the service")
+      return false
+    }
+    return true
+  }
+  async function stopListening(immediate = false) {
+    const remote = attached()
+    if (remote) {
+      const response = await backgroundCommand("stop")
+      if (!response?.accepted) { setNotice(response?.error || "Unable to stop background listener"); return false }
+      // The server cancels actions at acknowledgement, then releases the mic.
+      for (let n = 0; n < 50; n++) {
+        const status = await backgroundCommand("status")
+        if (!status?.state) break
+        if (n === 49) { setNotice("Background stop requested; listener is still closing"); return false }
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    }
+    await stopBridge(true, immediate)
+    return true
   }
   async function stopBridge(cancelPending = true, immediate = false) {
     if (cancelPending) listenerRequest++
     const old = bridge
     bridge = null
+    setAttached(false)
+    setRemoteLive(false)
+    setRemoteConfig(CONFIG)
     if (old) {
       try {
         old.kill(immediate ? "SIGKILL" : "SIGTERM")
@@ -260,8 +316,17 @@ function App() {
     if (!IS_DEMO && !bridge) setState("STOPPED")
   }
   function onMessage(m: BridgeMessage) {
-    if (m.type === "ready") {
-      if (!m.dry_run && preview()) {
+    if (m.type === "transition") {
+      setState("STARTING")
+      setNotice(m.message)
+    } else if (m.type === "ready") {
+      if (attached()) {
+        setRemoteLive(!m.dry_run)
+        setRemoteConfig(m.config_path || CONFIG)
+        setProfile(m.category || "default")
+        if (m.dry_run && armState().mode === "live") setSafety(SAFE_ARM, false)
+      }
+      if (!attached() && !m.dry_run && preview()) {
         void panicStop()
         setState("ERROR")
         setNotice("Safety mismatch: live bridge started without authorization; it was killed")
@@ -269,7 +334,7 @@ function App() {
       }
       setState(m.dry_run ? "PREVIEW" : "LISTENING")
       setThreshold(m.threshold_db)
-      setNotice("Microphone active · profile: " + (m.category || "default"))
+      setNotice((attached() ? "Background listener connected" : "Microphone active") + " · profile: " + (m.category || "default"))
       addLog("Microphone connected")
     } else if (m.type === "level") {
       setLevel(m.db)
@@ -289,7 +354,7 @@ function App() {
       setSafety(SAFE_ARM, false)
       addLog("Python bridge expired live authorization; switching to preview")
       setNotice("LIVE ACTIONS EXPIRED · restarting safe preview")
-      void startBridge(true)
+      if (!attached()) void startBridge(true)
     } else if (m.type === "impact_sample") {
       if (preview()) setCandidate({db:m.db, accepted:true})
     } else if (m.type === "near_miss") {
@@ -330,11 +395,13 @@ function App() {
       if (bridge === proc) setNotice("Bridge reader failed: " + String(error))
     }
   }
-  async function startBridge(forceStop = false) {
+  async function startBridge(forceStop = false, attachOnly = false) {
     if (IS_DEMO || calibrating()) return
     if (acousticBusy()) return
     setCandidate(null)
     const ticket = ++listenerRequest
+    const wasRemote = attached()
+    const oldRemoteConfig = remoteConfig()
     await stopBridge(false, forceStop)
     if (ticket !== listenerRequest) return
     if (expireArm(armState(), Date.now()).mode === "safe" && armState().mode !== "safe") {
@@ -348,6 +415,40 @@ function App() {
       setNotice("Invalid configuration: " + String(error))
       return
     }
+    const remote = await backgroundCommand("status")
+    if (ticket !== listenerRequest) return
+    if (remote?.state) {
+      if (wasRemote) {
+        const live = armState().mode === "live"
+        const operation = live ? "arm" : oldRemoteConfig === CONFIG ? "reload" : "safe"
+        const params = live ? ["--seconds", String(Math.max(0.001, (armState().expiresAt - Date.now()) / 1000))] : operation === "reload" && profile() !== "default" ? ["--category", profile()] : []
+        const response = await backgroundCommand(operation, params)
+        if (!response?.accepted) { setSafety(SAFE_ARM, false); addLog(response?.error || "Background control failed") }
+      }
+      if (ticket !== listenerRequest) return
+      setAttached(true)
+      setState("STARTING")
+      try {
+        const proc = Bun.spawn([PYTHON, "-u", "-m", "tabletap", "control", "watch"], {stdout:"pipe",stderr:"ignore",stdin:"ignore"})
+        bridge = proc
+        void receiveLines(proc)
+        void proc.exited.then(() => {
+          if (bridge !== proc) return
+          bridge = null
+          setAttached(false)
+          setRemoteLive(false)
+          setSafety(SAFE_ARM, false)
+          setState("STOPPED")
+          setNotice("Background listener disconnected · Space starts preview")
+        })
+      } catch (error) {
+        setAttached(false)
+        setState("ERROR")
+        setNotice("Cannot attach to background listener: " + String(error))
+      }
+      return
+    }
+    if (attachOnly) return
     setState("STARTING")
     setNotice("Opening microphone…")
     const args = [PYTHON, "-u", "-m", "tabletap", "bridge"]
@@ -391,13 +492,14 @@ function App() {
     }
     if (isListening() || state() === "STARTING") {
       disarm("Listener stopped · live actions disabled", false)
-      await stopBridge()
+      await stopListening()
     } else {
       setSafety(SAFE_ARM, false)
       await startBridge()
     }
   }
   async function selectProfile() {
+    if (!canEditRemote() || !await ensureBackgroundSafe()) return
     const options = getProfiles(config())
     const next = options[(options.indexOf(profile()) + 1) % options.length] || "default"
     disarm("Profile switched · live actions disabled", false)
@@ -405,16 +507,17 @@ function App() {
     setSelected(0)
     saveProfile(next)
     setNotice("Profile: " + next)
-    if (isListening()) await startBridge()
+    if (isListening() || attached()) await startBridge()
   }
-  function saveField(path: (string | number)[], value: string | number | boolean | null, label: string) {
+  async function saveField(path: (string | number)[], value: string | number | boolean | null, label: string) {
+    if (!canEditRemote() || !await ensureBackgroundSafe()) return false
     try {
       const updated = updateConfigField(CONFIG, path, value, IS_DEMO)
       disarm("Configuration changed · live actions disabled", false)
       setConfig(updated)
       setNotice("Saved " + label + " · original backed up as config.yaml.bak")
       addLog("Updated " + label)
-      if (isListening()) void startBridge()
+      if (isListening() || attached()) void startBridge()
       return true
     } catch (error) {
       setNotice("Not saved: " + String(error))
@@ -431,11 +534,12 @@ function App() {
     const nextType = options[(options.indexOf(action.type || "exec") + 1) % options.length] || "exec"
     saveField(actionFieldPath(profile(), key, "type"), nextType, profile() + "/" + key)
   }
-  function openBuilder() {
+  async function openBuilder() {
     if (IS_DEMO) {
       setNotice("Demo is read-only. Run tabletap without --demo to build actions.")
       return
     }
+    if (!canEditRemote() || !await ensureBackgroundSafe()) return
     const row = rows()[selected()]
     if (!row) {
       setPage(1)
@@ -529,7 +633,8 @@ function App() {
     editInput?.blur()
     setEditing(false)
   }
-  function saveBuilder() {
+  async function saveBuilder() {
+    if (!canEditRemote() || !await ensureBackgroundSafe()) return
     const row = rows()[selected()]
     if (!row) { setBuilderError("Selected action no longer exists"); return }
     const issue = validateActionDraft(builderDraft()) || (builderDraft().type === "launcher" && !getProfiles(config()).filter(p => p !== "default").includes(builderDraft().value.trim()) ? "Choose an existing named profile" : null)
@@ -541,7 +646,7 @@ function App() {
       setBuilderOpen(false)
       setNotice("Saved " + profile() + "/" + row[0] + " · one atomic update, original backed up")
       addLog("Builder saved " + profile() + "/" + row[0])
-      if (isListening()) void startBridge()
+      if (isListening() || attached()) void startBridge()
     } catch (error) {
       setBuilderError(String(error))
     }
@@ -568,7 +673,7 @@ function App() {
     setAcousticBusy(true)
     try {
       disarm("Acoustic profile operation · live actions disabled", false)
-      await stopBridge()
+      if (!canEditRemote() || !await stopListening()) return
       const proc = Bun.spawn([PYTHON, "-m", "tabletap", "acoustic", ...args], {
         stdout: "pipe", stderr: "ignore", stdin: "ignore",
       })
@@ -616,7 +721,7 @@ function App() {
     }
     if (calibrating() || acousticBusy()) return
     disarm("Calibration started · live actions disabled", false)
-    await stopBridge()
+    if (!canEditRemote() || !await stopListening()) return
     setCalibrating(true)
     calibrationCancelled = false
     setCalPhase("noise")
@@ -701,7 +806,7 @@ function App() {
     }
     else if (cmd === "stop") {
       disarm("Listener stopped · live actions disabled", false)
-      void stopBridge()
+      void stopListening()
     }
     else if (cmd === "calibrate") void calibrate()
     else if (cmd === "acoustic") {
@@ -711,6 +816,7 @@ function App() {
     }
     else if (cmd === "preview" || cmd === "safe") {
       disarm("Safe preview enabled · commands disabled")
+      if (attached()) void ensureBackgroundSafe()
     }
     else if (cmd === "arm") requestLive()
     else if (cmd === "confirm") confirmLive()
@@ -718,10 +824,13 @@ function App() {
     else if (cmd === "profile") {
       const options = getProfiles(config())
       if (arg && options.includes(arg)) {
-        disarm("Profile switched · live actions disabled", false)
-        setProfile(arg)
-        saveProfile(arg)
-        if (isListening()) void startBridge()
+        void (async () => {
+          if (!canEditRemote() || !await ensureBackgroundSafe()) return
+          disarm("Profile switched · live actions disabled", false)
+          setProfile(arg)
+          saveProfile(arg)
+          if (isListening() || attached()) void startBridge()
+        })()
       } else if (arg) setNotice("Unknown profile: " + arg + " · valid: " + options.join(", "))
       else void selectProfile()
     } else if (cmd === "theme") {
@@ -738,8 +847,10 @@ function App() {
     else if (cmd === "quit" || cmd === "exit") shutdown()
     else setNotice("Unknown command. Try /help.")
   }
-  function shutdown() {
+  async function shutdown() {
+    const ownedArm = armState().mode === "live"
     setSafety(SAFE_ARM, false)
+    if (attached() && ownedArm) await ensureBackgroundSafe()
     if (demoTimer) clearInterval(demoTimer)
     if (calibration) calibration.kill()
     void stopBridge()
@@ -926,6 +1037,7 @@ function App() {
       // Listening can execute local scripts. Require an explicit Space press.
       setState("STOPPED")
       setNotice("Press Space to listen safely (preview only) · press v to arm live actions")
+      void startBridge(false, true)
     }
   })
   onCleanup(() => {
@@ -938,7 +1050,7 @@ function App() {
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg} paddingX={2} paddingY={1}>
       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
-        <text fg={theme.dim}>{narrow() ? "v0.7.0" : "acoustic shortcuts  /  v0.7.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}</span></text>
+        <text fg={theme.dim}>{narrow() ? "v0.7.0" : "acoustic shortcuts  /  v0.7.0"}   <span style={{ fg: state() === "LISTENING" ? theme.good : theme.amber }}>● {state()}{attached() ? " · SERVICE" : ""}</span></text>
       </box>
       <box flexDirection="row" gap={3} paddingBottom={1} border={["bottom"]} borderColor={theme.border}>
         <Show when={!narrow()} fallback={<text fg={theme.accent}>Page {page() + 1}/5 · {screens()[page()]} · Tab next · ? help</text>}>
@@ -975,7 +1087,7 @@ function App() {
             <text fg={theme.accent}>{narrow() ? waveText().slice(-Math.max(10, dimensions().width - 14)) : waveText()}</text>
             <box flexDirection="row" justifyContent="space-between">
               <text fg={theme.dim}>mic {level()} dB  /  threshold {threshold().toFixed(1)} dB</text>
-              <text fg={theme.dim}>{preview() ? (armState().mode === "confirm" ? "CONFIRM Y · 4s" : "DRY RUN") : "LIVE until " + new Date(armState().expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</text>
+              <text fg={theme.dim}>{attached() ? (remoteLive() ? "BACKGROUND LIVE · X stops" : armState().mode === "confirm" ? "CONFIRM Y · 4s" : "BACKGROUND PREVIEW") : preview() ? (armState().mode === "confirm" ? "CONFIRM Y · 4s" : "DRY RUN") : "LIVE until " + new Date(armState().expiresAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}</text>
             </box>
           </box>
           <box width={panelWidth()} marginTop={1} flexDirection={narrow() ? "column" : "row"} justifyContent="space-between" gap={2}>

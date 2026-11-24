@@ -52,3 +52,13 @@ def test_service_expiry_returns_to_preview_and_stop(tmp_path):
         lock.return_value.acquire.return_value = True
         assert run_service(preview=True, hub_factory=lambda:ControlHub(path)) == 0
     assert calls == [(True,None),(False,2),(True,None)]
+
+
+def test_reload_supersedes_pending_arm_and_stop_cannot_be_overridden(tmp_path):
+    with ControlHub(tmp_path / "engine.sock") as hub:
+        hub.publish("ready",dry_run=True,category="default",threshold_db=-30)
+        assert hub.request({"command":"arm","seconds":10})["accepted"]
+        assert hub.request({"command":"reload","category":"media"})["accepted"]
+        assert hub.request({"command":"stop"})["accepted"]
+        assert "error" in hub.request({"command":"reload","category":None})
+        assert hub.take_request()["command"] == "stop"

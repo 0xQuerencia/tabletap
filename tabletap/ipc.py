@@ -167,7 +167,7 @@ class ControlHub:
         if set(request) != expected:
             return {"error":"Invalid control fields"}
         with self.guard:
-            if self.pending is not None and command not in ("safe", "stop"):
+            if self.pending is not None and command not in ("safe", "stop", "reload"):
                 return {"error":"Listener transition in progress"}
             if self.pending and self.pending["command"] == "stop":
                 return {"error":"Listener stopping"}

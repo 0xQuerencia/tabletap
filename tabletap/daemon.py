@@ -4,6 +4,7 @@ import logging
 from .bridge import run_bridge
 from .ipc import ControlHub
 from .lock import PIDLock
+from .config import load_config
 
 log = logging.getLogger("tabletap")
 
@@ -31,7 +32,14 @@ def run_service(config_path=None, category=None, preview=False, hub_factory=Cont
                     else:
                         dry_run, seconds = True, None
                         if command == "reload":
-                            category = request["category"]
+                            requested = request["category"]
+                            try:
+                                if requested is None or requested in load_config(config_path).get("actions", {}):
+                                    category = requested
+                                else:
+                                    hub.publish("error", message="Unknown profile; previous profile preserved")
+                            except (OSError, ValueError):
+                                hub.publish("error", message="Cannot reload configuration")
                     continue
                 if not dry_run and (status == 2 or (status == 0 and seconds is not None)):
                     # Failed live validation or expiry leaves a safe service.

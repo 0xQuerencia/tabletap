@@ -16,7 +16,7 @@ import yaml
 
 from .action import ActionRunner
 from .acoustic_profiles import verify_live, device_identity
-from .config import init_config, load_config
+from .config import init_config, load_config, DEFAULT_PATHS
 from .filter import AdaptiveThreshold, ImpactDetector, is_broadband_noise
 from .lock import PIDLock
 from .mic import MicCapture, MicDisconnected, rms_db
@@ -153,6 +153,7 @@ def run_bridge(config_path=None, category=None, dry_run=False, live_seconds=None
             report(
                 "ready", category=category or "default",
                 dry_run=dry_run, threshold_db=round(threshold.threshold_db + sensitivity_offset, 1),
+                **({"config_path":str(__import__("pathlib").Path(config_path or DEFAULT_PATHS[0]).absolute())} if control is not None else {}),
             )
             last_level_at = 0.0
             deadline = time.monotonic() + live_seconds if live_seconds is not None else None
